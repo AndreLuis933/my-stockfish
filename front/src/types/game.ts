@@ -11,5 +11,5 @@ export type Board = Cell[][];
 
 export interface Move {
   to: [number, number];
-  captured: [number, number] | null;
+  captured: [number, number][];
 }

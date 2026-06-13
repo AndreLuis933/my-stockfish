@@ -8,6 +8,38 @@
   gap: 28px;
 }
 
+/* ── Mode selector ─────────────────────────────────── */
+
+.modeSelector {
+  display: flex;
+  gap: 8px;
+}
+
+.modeButton {
+  padding: 7px 18px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(224, 216, 240, 0.55);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+}
+
+.modeButton:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #e0d8f0;
+}
+
+.modeButtonActive {
+  background: rgba(108, 92, 231, 0.25);
+  border-color: rgba(108, 92, 231, 0.6);
+  color: #e0d8f0;
+}
+
+/* ── Turn banner ────────────────────────────────────── */
+
 .turnBanner {
   display: flex;
   align-items: center;
@@ -47,4 +79,55 @@
   letter-spacing: 0.04em;
   min-width: 140px;
   text-align: center;
+}
+
+/* ── Result overlay ────────────────────────────────── */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 8, 20, 0.82);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.resultCard {
+  background: #2a2640;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  padding: 40px 56px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.7);
+}
+
+.resultTitle {
+  font-size: 28px;
+  font-weight: 700;
+  color: #e0d8f0;
+  letter-spacing: 0.02em;
+}
+
+.restartButton {
+  padding: 12px 32px;
+  border-radius: 999px;
+  border: none;
+  background: #6c5ce7;
+  color: #fff;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 150ms ease, transform 100ms ease;
+}
+
+.restartButton:hover {
+  background: #7d6ff0;
+}
+
+.restartButton:active {
+  transform: scale(0.96);
 }

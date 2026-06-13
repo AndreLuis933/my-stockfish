@@ -5,6 +5,7 @@ interface BoardProps {
   board: BoardState;
   selectedSquare?: [number, number] | null;
   validMoveSquares?: [number, number][];
+  mustMoveSquares?: [number, number][];
   onSquareClick?: (row: number, col: number) => void;
 }
 
@@ -12,6 +13,7 @@ export const Board = ({
   board,
   selectedSquare = null,
   validMoveSquares = [],
+  mustMoveSquares = [],
   onSquareClick,
 }: BoardProps) => {
   return (
@@ -21,6 +23,7 @@ export const Board = ({
           const isDark = (r + c) % 2 !== 0;
           const isSelected = selectedSquare?.[0] === r && selectedSquare?.[1] === c;
           const isValidTarget = validMoveSquares.some(([vr, vc]) => vr === r && vc === c);
+          const isMustMove = mustMoveSquares.some(([mr, mc]) => mr === r && mc === c);
 
           const squareClass = [
             styles.square,
@@ -41,6 +44,8 @@ export const Board = ({
               ) : (
                 <div className={styles.moveHint} />
               ))}
+
+              {isMustMove && <div className={styles.mustMoveHint} />}
 
               {cell && <Piece cell={cell} />}
             </div>

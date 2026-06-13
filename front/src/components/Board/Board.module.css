@@ -56,6 +56,29 @@
   z-index: 3;
 }
 
+/* Pulsing orange ring — shown on pieces the player is forced to move */
+.mustMoveHint {
+  position: absolute;
+  width: 76%;
+  height: 76%;
+  border-radius: 50%;
+  border: 3px solid #ff8c00;
+  pointer-events: none;
+  z-index: 3;
+  animation: mustMoveFlash 500ms ease-in-out infinite alternate;
+}
+
+@keyframes mustMoveFlash {
+  from {
+    box-shadow: 0 0 6px rgba(255, 140, 0, 0.5);
+    opacity: 0.75;
+  }
+  to {
+    box-shadow: 0 0 18px rgba(255, 140, 0, 0.95);
+    opacity: 1;
+  }
+}
+
 /* ── Pieces ──────────────────────────────────────── */
 
 .piece {

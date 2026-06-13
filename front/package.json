@@ -6,8 +6,12 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "lint": "bunx eslint .",
+    "lint:strict": "bunx eslint . --config eslint.config.strict.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check": "bun run tsc --noEmit && bun run lint:strict"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",
@@ -28,6 +32,7 @@
     "globals": "^17.6.0",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.59.2",
-    "vite": "^8.0.12"
+    "vite": "^8.0.12",
+    "vitest": "^4.1.8"
   }
 }
