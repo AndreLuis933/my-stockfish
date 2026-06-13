@@ -1,0 +1,101 @@
+.board {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  /* Square board: uses the smaller of vw/vh so it fits any screen */
+  width: min(80vw, 80vh, 560px);
+  height: min(80vw, 80vh, 560px);
+  border: 4px solid #3d2b1f;
+  border-radius: 4px;
+  box-shadow: 0 16px 56px rgba(0, 0, 0, 0.65);
+  overflow: hidden;
+}
+
+/* ── Squares ─────────────────────────────────────── */
+
+.square {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Forces each cell to stay square inside the grid */
+  aspect-ratio: 1;
+}
+
+.light {
+  background-color: #eeeed2;
+}
+
+.dark {
+  background-color: #769656;
+}
+
+/* Highlight for the selected piece's square */
+.selected {
+  background-color: #f6f669 !important;
+}
+
+/* ── Move hints ──────────────────────────────────── */
+
+/* Small dot on empty destination squares */
+.moveHint {
+  width: 30%;
+  height: 30%;
+  border-radius: 50%;
+  background-color: rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Ring around a capturable enemy piece */
+.captureHint {
+  position: absolute;
+  inset: 8%;
+  border-radius: 50%;
+  border: 3px solid rgba(200, 0, 0, 0.6);
+  pointer-events: none;
+  z-index: 3;
+}
+
+/* ── Pieces ──────────────────────────────────────── */
+
+.piece {
+  width: 76%;
+  height: 76%;
+  border-radius: 50%;
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 80ms ease;
+}
+
+.piece:active {
+  transform: scale(0.92);
+}
+
+.white {
+  background: radial-gradient(circle at 35% 32%, #f7f2e8, #c5b080);
+  border: 3px solid #8b7040;
+  box-shadow:
+    0 4px 8px rgba(0, 0, 0, 0.4),
+    inset 0 2px 3px rgba(255, 255, 255, 0.55);
+}
+
+.black {
+  background: radial-gradient(circle at 35% 32%, #5a3d28, #180e06);
+  border: 3px solid #3a1f0a;
+  box-shadow:
+    0 4px 8px rgba(0, 0, 0, 0.55),
+    inset 0 2px 3px rgba(255, 255, 255, 0.1);
+}
+
+/* Gold dot inside king pieces */
+.kingMark {
+  width: 36%;
+  height: 36%;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #ffe066, #c8960a);
+  box-shadow: 0 0 5px rgba(255, 210, 0, 0.7);
+}

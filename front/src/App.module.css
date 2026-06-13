@@ -1,0 +1,50 @@
+.page {
+  min-height: 100svh;
+  background-color: #1e1b2e;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 28px;
+}
+
+.turnBanner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 24px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.dot {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  transition: box-shadow 200ms ease, opacity 200ms ease;
+  opacity: 0.35;
+}
+
+.dot.active {
+  opacity: 1;
+  box-shadow: 0 0 14px rgba(255, 255, 255, 0.35);
+}
+
+.dotWhite {
+  background: radial-gradient(circle at 35% 35%, #f5f0e8, #c9b99a);
+}
+
+.dotBlack {
+  background: radial-gradient(circle at 35% 35%, #5a3d28, #180e06);
+}
+
+.turnText {
+  font-size: 16px;
+  font-weight: 500;
+  color: #e0d8f0;
+  letter-spacing: 0.04em;
+  min-width: 140px;
+  text-align: center;
+}
