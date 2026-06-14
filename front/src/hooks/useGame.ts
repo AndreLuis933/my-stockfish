@@ -49,17 +49,13 @@ const isAiColor = (mode: GameMode, color: Color): boolean => {
 export const useGame = (mode: GameMode = "human-vs-ai") => {
   const [state, setState] = useState<GameState>(initialState);
 
-  // Restart when mode changes
-  useEffect(() => {
-    setState(initialState());
-  }, [mode]);
+  // Destructure at hook level so the effect deps list individual stable references
+  // rather than the `state` object itself.
+  const { board, currentPlayer, movesSinceCapture, result } = state;
 
-  // Trigger AI move when it's the AI's turn
   useEffect(() => {
-    if (state.result !== null) return;
-    if (!isAiColor(mode, state.currentPlayer)) return;
-
-    const { board, currentPlayer, movesSinceCapture } = state;
+    if (result !== null) return;
+    if (!isAiColor(mode, currentPlayer)) return;
 
     const timer = setTimeout(() => {
       const best = pickBestMove(board, currentPlayer, movesSinceCapture);
@@ -86,23 +82,30 @@ export const useGame = (mode: GameMode = "human-vs-ai") => {
     }, AI_DELAY_MS);
 
     return () => clearTimeout(timer);
-  }, [state.result, state.currentPlayer, state.board, state.movesSinceCapture, mode]);
+  }, [result, currentPlayer, board, movesSinceCapture, mode]);
 
   const handleSquareClick = (row: number, col: number) => {
-    const { board, currentPlayer, selectedSquare, movesForSelected, turnState, movesSinceCapture, result } = state;
+    const {
+      board: b,
+      currentPlayer: cp,
+      selectedSquare,
+      movesForSelected,
+      turnState,
+      movesSinceCapture: msc,
+      result: r,
+    } = state;
 
-    if (result !== null) return;
-    if (isAiColor(mode, currentPlayer)) return;
+    if (r !== null) return;
+    if (isAiColor(mode, cp)) return;
 
-    // Clicking a valid destination: apply the move
     const targetMove = movesForSelected.find((m) => m.to[0] === row && m.to[1] === col);
     if (targetMove && selectedSquare) {
-      const movedPiece = board[selectedSquare[0]][selectedSquare[1]];
-      const nextBoard = applyMove(selectedSquare, targetMove, board);
-      const nextPlayer: Color = currentPlayer === "white" ? "black" : "white";
+      const movedPiece = b[selectedSquare[0]][selectedSquare[1]];
+      const nextBoard = applyMove(selectedSquare, targetMove, b);
+      const nextPlayer: Color = cp === "white" ? "black" : "white";
       const nextTurnState = computeTurnState(nextBoard, nextPlayer);
       const resetsCounter = targetMove.captured.length > 0 || movedPiece?.type === "man";
-      const nextMovesSinceCapture = resetsCounter ? 0 : movesSinceCapture + 1;
+      const nextMovesSinceCapture = resetsCounter ? 0 : msc + 1;
       setState({
         board: nextBoard,
         currentPlayer: nextPlayer,
@@ -116,10 +119,9 @@ export const useGame = (mode: GameMode = "human-vs-ai") => {
       return;
     }
 
-    // Clicking a friendly piece
-    const piece = board[row][col];
-    if (piece?.color === currentPlayer) {
-      const isSelectable = turnState.selectable.some(([r, c]) => r === row && c === col);
+    const piece = b[row][col];
+    if (piece?.color === cp) {
+      const isSelectable = turnState.selectable.some(([sr, sc]) => sr === row && sc === col);
       if (!isSelectable) {
         setState({ ...state, flashSelectable: true, selectedSquare: null, movesForSelected: [] });
         return;
@@ -127,13 +129,12 @@ export const useGame = (mode: GameMode = "human-vs-ai") => {
       setState({
         ...state,
         selectedSquare: [row, col],
-        movesForSelected: validMoves(row, col, board, turnState.globalMax),
+        movesForSelected: validMoves(row, col, b, turnState.globalMax),
         flashSelectable: false,
       });
       return;
     }
 
-    // Clicking anything else: deselect
     setState({ ...state, selectedSquare: null, movesForSelected: [], flashSelectable: false });
   };
 

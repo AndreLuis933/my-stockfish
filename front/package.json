@@ -11,7 +11,7 @@
     "lint:strict": "bunx eslint . --config eslint.config.strict.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check": "bun run tsc --noEmit && bun run lint:strict"
+    "check": "tsc -b && bun run lint:strict"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",

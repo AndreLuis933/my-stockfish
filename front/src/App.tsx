@@ -18,10 +18,19 @@ const MODES: { value: GameMode; label: string }[] = [
 
 function App() {
   const [mode, setMode] = useState<GameMode>("human-vs-ai");
+  const [flipped, setFlipped] = useState(false);
   const { state, handleSquareClick, restartGame } = useGame(mode);
   const { board, currentPlayer, selectedSquare, movesForSelected, turnState, flashSelectable, result } = state;
 
   const aiThinking = mode === "ai-vs-ai" || (mode === "human-vs-ai" && currentPlayer === "black");
+
+  const pieceCounts = board.reduce(
+    (acc, row) => {
+      row.forEach((cell) => { if (cell) acc[cell.color]++; });
+      return acc;
+    },
+    { white: 0, black: 0 }
+  );
 
   return (
     <div className={styles.page}>
@@ -30,7 +39,7 @@ function App() {
           <button
             key={m.value}
             className={`${styles.modeButton} ${mode === m.value ? styles.modeButtonActive : ""}`}
-            onClick={() => setMode(m.value)}
+            onClick={() => { restartGame(); setMode(m.value); }}
           >
             {m.label}
           </button>
@@ -38,7 +47,10 @@ function App() {
       </div>
 
       <div className={styles.turnBanner}>
-        <div className={`${styles.dot} ${styles.dotWhite} ${currentPlayer === "white" ? styles.active : ""}`} />
+        <div className={styles.sideInfo}>
+          <div className={`${styles.dot} ${styles.dotWhite} ${currentPlayer === "white" ? styles.active : ""}`} />
+          <span className={styles.pieceCountText}>{pieceCounts.white}</span>
+        </div>
         <span className={styles.turnText}>
           {aiThinking && result === null
             ? "IA pensando..."
@@ -46,7 +58,10 @@ function App() {
               ? "Vez das Brancas"
               : "Vez das Pretas"}
         </span>
-        <div className={`${styles.dot} ${styles.dotBlack} ${currentPlayer === "black" ? styles.active : ""}`} />
+        <div className={styles.sideInfo}>
+          <span className={styles.pieceCountText}>{pieceCounts.black}</span>
+          <div className={`${styles.dot} ${styles.dotBlack} ${currentPlayer === "black" ? styles.active : ""}`} />
+        </div>
       </div>
 
       <Board
@@ -55,7 +70,18 @@ function App() {
         validMoveSquares={movesForSelected.map((m) => m.to)}
         mustMoveSquares={flashSelectable ? turnState.selectable : []}
         onSquareClick={handleSquareClick}
+        flipped={flipped}
       />
+
+      <div className={styles.actions}>
+        <button className={styles.actionButton} onClick={restartGame}>Reiniciar</button>
+        <button
+          className={`${styles.actionButton} ${flipped ? styles.actionButtonActive : ""}`}
+          onClick={() => setFlipped((f) => !f)}
+        >
+          Girar ↺
+        </button>
+      </div>
 
       {result && (
         <div className={styles.overlay}>

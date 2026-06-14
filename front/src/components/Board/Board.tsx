@@ -7,7 +7,10 @@ interface BoardProps {
   validMoveSquares?: [number, number][];
   mustMoveSquares?: [number, number][];
   onSquareClick?: (row: number, col: number) => void;
+  flipped?: boolean;
 }
+
+const INDICES = Array.from({ length: 8 }, (_, i) => i);
 
 export const Board = ({
   board,
@@ -15,11 +18,16 @@ export const Board = ({
   validMoveSquares = [],
   mustMoveSquares = [],
   onSquareClick,
+  flipped = false,
 }: BoardProps) => {
+  const rowIndices = flipped ? [...INDICES].reverse() : INDICES;
+  const colIndices = flipped ? [...INDICES].reverse() : INDICES;
+
   return (
     <div className={styles.board}>
-      {board.map((row, r) =>
-        row.map((cell, c) => {
+      {rowIndices.map((r) =>
+        colIndices.map((c) => {
+          const cell = board[r][c];
           const isDark = (r + c) % 2 !== 0;
           const isSelected = selectedSquare?.[0] === r && selectedSquare?.[1] === c;
           const isValidTarget = validMoveSquares.some(([vr, vc]) => vr === r && vc === c);
