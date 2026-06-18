@@ -12,8 +12,9 @@ func MakeMovement(from, to, promotion int) {
 		Board[to] = types.Piece(promotion)
 	} else {
 		Board[to] = piece
-
 	}
+	
+	whiteToMove = !whiteToMove
 
 	enPassantCapture, enPassantTarget = -1, -1
 

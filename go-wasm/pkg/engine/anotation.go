@@ -33,4 +33,19 @@ func LoadFen(fen string) {
 			row++
 		}
 	}
+	whiteToMove = fields[1] == "w"
+
+	for _, right := range fields[2] {
+		switch right {
+		case 'K':
+			castlingRights |= types.CastleWhiteK
+		case 'Q':
+			castlingRights |= types.CastleWhiteQ
+		case 'k':
+			castlingRights |= types.CastleBlackK
+		case 'q':
+			castlingRights |= types.CastleBlackQ
+		}
+	}
+
 }

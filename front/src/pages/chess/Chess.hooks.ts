@@ -26,6 +26,7 @@ interface ChessState {
   result: ChessResult;
   pendingPromotion: PendingPromotion | null;
   candidateMoves: Move[];
+  checkSquare: number | null;
 }
 
 const initialState = (): ChessState => ({
@@ -36,6 +37,7 @@ const initialState = (): ChessState => ({
   result: null,
   pendingPromotion: null,
   candidateMoves: [],
+  checkSquare: null,
 });
 
 const pieceColor = (byte: number): ChessColor | null => {
@@ -45,6 +47,13 @@ const pieceColor = (byte: number): ChessColor | null => {
 
 const isAiTurn = (mode: ChessGameMode, color: ChessColor): boolean =>
   mode === "human-vs-ai" && color === "black";
+
+const toResult = (status: string): ChessResult => {
+  if (status === "white-wins" || status === "black-wins" || status === "draw") {
+    return status;
+  }
+  return null;
+};
 
 export const useChess = (mode: ChessGameMode = "human-vs-ai") => {
   const [state, setState] = useState<ChessState>(initialState);
@@ -64,8 +73,13 @@ export const useChess = (mode: ChessGameMode = "human-vs-ai") => {
 
     async function loadBoard() {
       const rawBoard = await currentEngine.initBoard();
+      const checkSquare = await currentEngine.isCheckJS();
       if (!cancelled) {
-        setState((prev) => ({ ...prev, board: Array.from(rawBoard) }));
+        setState((prev) => ({
+          ...prev,
+          board: Array.from(rawBoard),
+          checkSquare: checkSquare === -1 ? null : checkSquare,
+        }));
       }
     }
 
@@ -116,6 +130,9 @@ export const useChess = (mode: ChessGameMode = "human-vs-ai") => {
         }
 
         const rawBoard = await engine.makeMove(from, to);
+        const checkSquare = await engine.isCheckJS();
+        const status = await engine.gameStatus();
+        const nextPlayer: ChessColor = prev.currentPlayer === "white" ? "black" : "white";
 
         setState((p) => ({
           ...p,
@@ -123,7 +140,9 @@ export const useChess = (mode: ChessGameMode = "human-vs-ai") => {
           selectedSquare: null,
           validMoveSquares: [],
           candidateMoves: [],
-          currentPlayer: p.currentPlayer === "white" ? "black" : "white",
+          currentPlayer: nextPlayer,
+          checkSquare: checkSquare === -1 ? null : checkSquare,
+          result: toResult(status),
         }));
         return;
       }
@@ -162,7 +181,12 @@ export const useChess = (mode: ChessGameMode = "human-vs-ai") => {
     setState(initialState);
     if (engine) {
       const rawBoard = await engine.initBoard();
-      setState((prev) => ({ ...prev, board: Array.from(rawBoard) }));
+      const checkSquare = await engine.isCheckJS();
+      setState((prev) => ({
+        ...prev,
+        board: Array.from(rawBoard),
+        checkSquare: checkSquare === -1 ? null : checkSquare,
+      }));
     }
   }, [engine]);
 
@@ -177,13 +201,18 @@ export const useChess = (mode: ChessGameMode = "human-vs-ai") => {
         pending.to,
         promotionByte,
       );
+      const checkSquare = await engine.isCheckJS();
+      const status = await engine.gameStatus();
+      const nextPlayer: ChessColor = prev.currentPlayer === "white" ? "black" : "white";
 
       setState((p) => ({
         ...p,
         board: Array.from(rawBoard),
         pendingPromotion: null,
         candidateMoves: [],
-        currentPlayer: p.currentPlayer === "white" ? "black" : "white",
+        currentPlayer: nextPlayer,
+        checkSquare: checkSquare === -1 ? null : checkSquare,
+        result: toResult(status),
       }));
     },
     [engine],

@@ -3,7 +3,20 @@ package types
 // Piece uint8:
 // bits 0-5: type (one-hot)
 // bits 6-7: color (00=none, 01=white, 10=black)
+
 type Piece uint8
+type CastlingRights uint8
+
+const (
+	CastleWhiteK CastlingRights = 1 << 0
+	CastleWhiteQ CastlingRights = 1 << 1
+	CastleBlackK CastlingRights = 1 << 2
+	CastleBlackQ CastlingRights = 1 << 3
+
+	CastleWhiteAll CastlingRights = CastleWhiteK | CastleWhiteQ
+	CastleBlackAll CastlingRights = CastleBlackK | CastleBlackQ
+	CastleAll      CastlingRights = CastleWhiteAll | CastleBlackAll
+)
 
 const (
 	Pawn   Piece = 1 << 0
@@ -30,7 +43,22 @@ const Sliders Piece = Bishop | Rook | Queen
 type Board [64]Piece
 
 type Move struct {
-	From int `json:"from"`
-	To   int `json:"to"`
+	From      int    `json:"from"`
+	To        int    `json:"to"`
 	Promotion *Piece `json:"promotion,omitempty"`
+}
+
+func (p Piece) IsWhite() bool {
+	return p&ColorMask == ColorWhite
+}
+func (p Piece) IsBlack() bool {
+	return p&ColorMask == ColorBlack
+}
+
+func (p Piece) Color() Piece {
+	return p & ColorMask
+}
+
+func (p Piece) TypePiece() Piece {
+	return p & TypeMask
 }

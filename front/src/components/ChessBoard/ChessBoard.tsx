@@ -9,6 +9,7 @@ interface ChessBoardProps {
   validMoveSquares?: number[];
   onSquareClick?: (index: number) => Promise<void>;
   flipped?: boolean;
+  checkSquare?: number | null;
 }
 
 const INDICES = Array.from({ length: 8 }, (_, i) => i);
@@ -19,6 +20,7 @@ export const ChessBoard = ({
   validMoveSquares = [],
   onSquareClick,
   flipped = false,
+  checkSquare = null,
 }: ChessBoardProps) => {
   const rowIndices = flipped ? INDICES : [...INDICES].reverse();
   const colIndices = flipped ? [...INDICES].reverse() : INDICES;
@@ -32,11 +34,13 @@ export const ChessBoard = ({
           const isDark = (r + c) % 2 !== 0;
           const isSelected = selectedSquare === index;
           const isValidTarget = validMoveSquares.includes(index);
+          const isInCheck = checkSquare === index;
 
           const squareClass = [
             styles.square,
             isDark ? styles.dark : styles.light,
             isSelected ? styles.selected : "",
+            isInCheck ? styles.check : "",
           ]
             .filter(Boolean)
             .join(" ");

@@ -3,8 +3,10 @@ export interface WasmContract {
   validMovesChess: { args: []; return: string };
   initBoard: { args: []; return: number[] };
   makeMove: { args: [number, number, number?]; return: number[] };
+  isCheckJS: { args: []; return: number };
+  gameStatus: { args: []; return: string };
 }
-
+;
 export type WasmFunctionName = keyof WasmContract;
 
 export type WasmEngine = {

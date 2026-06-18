@@ -112,6 +112,8 @@ export class WasmWorkerEngine extends WasmWorkerEngineCore implements WasmEngine
   validMovesChess = this.fn("validMovesChess");
   initBoard = this.fn("initBoard");
   makeMove = this.fn("makeMove");
+  isCheckJS = this.fn("isCheckJS");
+  gameStatus = this.fn("gameStatus");
 }
 
 export async function loadWasmEngine(): Promise<WasmEngine> {

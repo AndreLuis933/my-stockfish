@@ -6,10 +6,17 @@ var kingDirections = []int{-1, 1, 8, -8, 7, -7, 9, -9}
 
 func GetMoveKing(piece types.Piece, i int, moves []types.Move) []types.Move {
 	isWhite := piece&types.ColorWhite == types.ColorWhite
+	startRow, startCol := i/boardSize, i%boardSize
 
 	for _, dir := range kingDirections {
 		target := i + dir
 		if !inBounds(target) {
+			continue
+		}
+
+		rowDiff := abs(target/boardSize - startRow)
+		colDiff := abs(target%boardSize - startCol)
+		if rowDiff > 1 || colDiff > 1 {
 			continue
 		}
 

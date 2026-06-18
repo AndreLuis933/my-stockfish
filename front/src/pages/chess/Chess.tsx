@@ -20,7 +20,7 @@ export const Chess = () => {
   const [mode, setMode] = useState<ChessGameMode>("human-vs-human");
   const [flipped, setFlipped] = useState(false);
   const { state, handleSquareClick, restartGame, choosePromotion, cancelPromotion } = useChess(mode);
-  const { board, currentPlayer, selectedSquare, validMoveSquares, result, pendingPromotion } = state;
+  const { board, currentPlayer, selectedSquare, validMoveSquares, result, pendingPromotion, checkSquare } = state;
   
 
   return (
@@ -46,6 +46,7 @@ export const Chess = () => {
         />
         <span className={styles.turnText}>
           {currentPlayer === "white" ? "Vez das Brancas" : "Vez das Pretas"}
+          {checkSquare !== null && <span className={styles.checkBadge}>Xeque!</span>}
         </span>
         <div
           className={`${styles.dot} ${styles.dotBlack} ${currentPlayer === "black" ? styles.active : ""}`}
@@ -58,6 +59,7 @@ export const Chess = () => {
         validMoveSquares={validMoveSquares}
         onSquareClick={handleSquareClick}
         flipped={flipped}
+        checkSquare={checkSquare}
       />
 
       <div className={styles.engineNotice}>

@@ -6,10 +6,12 @@ func GetMovePawn(piece types.Piece, i int, moves []types.Move) []types.Move {
 	row := i / boardSize
 	col := i % boardSize
 	isWhite := piece&types.ColorWhite == types.ColorWhite
+	enemyColor := oppositeColor(piece)
+	myColor := PieceColor(piece)
 
-	dir, startRow, promotionRow, enemyColor, myColor := -boardSize, 6, 1, types.ColorWhite, types.ColorBlack
+	dir, startRow, promotionRow := -boardSize, 6, 1
 	if isWhite {
-		dir, startRow, promotionRow, enemyColor, myColor = boardSize, 1, 6, types.ColorBlack, types.ColorWhite
+		dir, startRow, promotionRow = boardSize, 1, 6
 	}
 
 	if forward := i + dir; inBounds(forward) && Board[forward] == 0 {

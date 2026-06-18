@@ -2,9 +2,12 @@ package engine
 
 import "webassemble/pkg/types"
 
-func GetValidMoves() []types.Move {
+func getPseudoLegalMoves() []types.Move {
 	var moves []types.Move
 	for i, piece := range Board {
+		if piece == 0 || piece.IsWhite() != whiteToMove {
+			continue
+		}
 
 		if piece&types.Pawn == types.Pawn {
 			moves = GetMovePawn(piece, i, moves)

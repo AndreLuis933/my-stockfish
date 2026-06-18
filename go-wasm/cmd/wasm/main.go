@@ -34,6 +34,14 @@ func getBoardJS(_ js.Value, _ []js.Value) interface{} {
 	return getBoard()
 }
 
+func isCheckJS(_ js.Value, _ []js.Value) interface{} {
+	return engine.KingCheck()
+}
+
+func gameStatusJS(_ js.Value, _ []js.Value) interface{} {
+	return engine.CurrentStatus().String()
+}
+
 func makeMoveJS(_ js.Value, args []js.Value) interface{} {
 	promotion := 0
 	if len(args) > 2 && !args[2].IsUndefined() && args[2].Type() == js.TypeNumber {
@@ -55,6 +63,8 @@ func main() {
 	e.Set("validMovesChess", js.FuncOf(getValidMovesJS))
 	e.Set("initBoard", js.FuncOf(initBoardJs))
 	e.Set("makeMove", js.FuncOf(makeMoveJS))
+	e.Set("isCheckJS", js.FuncOf(isCheckJS))
+	e.Set("gameStatus", js.FuncOf(gameStatusJS))
 	js.Global().Set("goWasmEngine", e)
 	select {}
 }
