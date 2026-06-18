@@ -6,9 +6,16 @@ import { useWasm } from "@/wasm/useWasm";
 export type ChessGameMode = "human-vs-ai" | "human-vs-human";
 export type ChessResult = "white-wins" | "black-wins" | "draw" | null;
 
+export interface PendingPromotion {
+  from: number;
+  to: number;
+  options: number[];
+}
+
 interface Move {
   from: number;
   to: number;
+  promotion?: number;
 }
 
 interface ChessState {
@@ -17,6 +24,8 @@ interface ChessState {
   selectedSquare: number | null;
   validMoveSquares: number[];
   result: ChessResult;
+  pendingPromotion: PendingPromotion | null;
+  candidateMoves: Move[];
 }
 
 const initialState = (): ChessState => ({
@@ -25,6 +34,8 @@ const initialState = (): ChessState => ({
   selectedSquare: null,
   validMoveSquares: [],
   result: null,
+  pendingPromotion: null,
+  candidateMoves: [],
 });
 
 const pieceColor = (byte: number): ChessColor | null => {
@@ -85,6 +96,25 @@ export const useChess = (mode: ChessGameMode = "human-vs-ai") => {
       ) {
         const from = prev.selectedSquare;
         const to = index;
+
+        const promotionMoves = prev.candidateMoves.filter(
+          (m) => m.from === from && m.to === to && m.promotion !== undefined,
+        );
+
+        if (promotionMoves.length > 0) {
+          setState((p) => ({
+            ...p,
+            pendingPromotion: {
+              from,
+              to,
+              options: promotionMoves.map((m) => m.promotion!),
+            },
+            selectedSquare: null,
+            validMoveSquares: [],
+          }));
+          return;
+        }
+
         const rawBoard = await engine.makeMove(from, to);
 
         setState((p) => ({
@@ -92,6 +122,7 @@ export const useChess = (mode: ChessGameMode = "human-vs-ai") => {
           board: Array.from(rawBoard),
           selectedSquare: null,
           validMoveSquares: [],
+          candidateMoves: [],
           currentPlayer: p.currentPlayer === "white" ? "black" : "white",
         }));
         return;
@@ -116,13 +147,12 @@ export const useChess = (mode: ChessGameMode = "human-vs-ai") => {
 
       const movesJson = await engine.validMovesChess();
       const moves: Move[] = JSON.parse(movesJson);
-      const targets = moves
-        .filter((m) => m.from === index)
-        .map((m) => m.to);
+      const ownMoves = moves.filter((m) => m.from === index);
+      const targets = ownMoves.map((m) => m.to);
 
       setState((p) => {
         if (p.selectedSquare !== index) return p;
-        return { ...p, validMoveSquares: targets };
+        return { ...p, validMoveSquares: targets, candidateMoves: ownMoves };
       });
     },
     [engine, mode],
@@ -136,5 +166,38 @@ export const useChess = (mode: ChessGameMode = "human-vs-ai") => {
     }
   }, [engine]);
 
-  return { state, handleSquareClick, restartGame };
+  const choosePromotion = useCallback(
+    async (promotionByte: number) => {
+      const prev = stateRef.current;
+      const pending = prev.pendingPromotion;
+      if (!engine || !pending) return;
+
+      const rawBoard = await engine.makeMove(
+        pending.from,
+        pending.to,
+        promotionByte,
+      );
+
+      setState((p) => ({
+        ...p,
+        board: Array.from(rawBoard),
+        pendingPromotion: null,
+        candidateMoves: [],
+        currentPlayer: p.currentPlayer === "white" ? "black" : "white",
+      }));
+    },
+    [engine],
+  );
+
+  const cancelPromotion = useCallback(() => {
+    setState((p) => ({ ...p, pendingPromotion: null }));
+  }, []);
+
+  return {
+    state,
+    handleSquareClick,
+    restartGame,
+    choosePromotion,
+    cancelPromotion,
+  };
 };

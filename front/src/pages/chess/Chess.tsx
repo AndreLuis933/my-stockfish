@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { ChessBoard } from "@/components/ChessBoard/ChessBoard";
+import { PromotionPicker } from "@/components/PromotionPicker/PromotionPicker";
 import type { ChessGameMode } from "./Chess.hooks";
 import { useChess } from "./Chess.hooks";
 import styles from "./Chess.module.css";
@@ -18,8 +19,8 @@ const MODES: { value: ChessGameMode; label: string }[] = [
 export const Chess = () => {
   const [mode, setMode] = useState<ChessGameMode>("human-vs-human");
   const [flipped, setFlipped] = useState(false);
-  const { state, handleSquareClick, restartGame } = useChess(mode);
-  const { board, currentPlayer, selectedSquare, validMoveSquares, result } = state;
+  const { state, handleSquareClick, restartGame, choosePromotion, cancelPromotion } = useChess(mode);
+  const { board, currentPlayer, selectedSquare, validMoveSquares, result, pendingPromotion } = state;
   
 
   return (
@@ -84,6 +85,14 @@ export const Chess = () => {
             </button>
           </div>
         </div>
+      )}
+
+      {pendingPromotion && (
+        <PromotionPicker
+          options={pendingPromotion.options}
+          onSelect={choosePromotion}
+          onCancel={cancelPromotion}
+        />
       )}
     </div>
   );

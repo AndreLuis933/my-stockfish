@@ -45,3 +45,11 @@ export const squareRowCol = (index: number): [number, number] => [
   Math.floor(index / 8),
   index % 8,
 ];
+
+export const decodePieceByte = (byte: number): ChessPiece => {
+  const typeBits = byte & 0b00111111;
+  const type = PIECE_TYPES[typeBits];
+  const color: ChessColor =
+    (byte & COLOR_BITS) === WHITE_BITS ? "white" : "black";
+  return { color, type };
+};

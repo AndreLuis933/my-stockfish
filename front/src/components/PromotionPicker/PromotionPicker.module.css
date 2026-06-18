@@ -1,0 +1,61 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 8, 20, 0.82);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+}
+
+.card {
+  background: #2a2640;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  padding: 32px 40px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.7);
+}
+
+.title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #e0d8f0;
+  letter-spacing: 0.02em;
+}
+
+.options {
+  display: flex;
+  gap: 12px;
+}
+
+.option {
+  width: 72px;
+  height: 72px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 150ms ease, border-color 150ms ease, transform 100ms ease;
+}
+
+.option:hover {
+  background: rgba(108, 92, 231, 0.25);
+  border-color: rgba(108, 92, 231, 0.6);
+}
+
+.option:active {
+  transform: scale(0.96);
+}
+
+.piece {
+  width: 56px;
+  height: 56px;
+  pointer-events: none;
+}

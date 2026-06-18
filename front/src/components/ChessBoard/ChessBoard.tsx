@@ -1,5 +1,6 @@
 import type { ChessBoard as ChessBoardState, ChessPiece } from "@/types/chess";
 import { getPiece } from "@/types/chess";
+import { pieceImageUrl } from "@/utils/chessAssets";
 import styles from "./ChessBoard.module.css";
 
 interface ChessBoardProps {
@@ -9,19 +10,6 @@ interface ChessBoardProps {
   onSquareClick?: (index: number) => Promise<void>;
   flipped?: boolean;
 }
-
-const COLOR_PREFIX = { white: "w", black: "b" } as const;
-const TYPE_CODE = {
-  pawn: "P",
-  rook: "R",
-  knight: "N",
-  bishop: "B",
-  queen: "Q",
-  king: "K",
-} as const;
-
-const pieceUrl = (piece: ChessPiece) =>
-  `/pieces/cburnett/${COLOR_PREFIX[piece.color]}${TYPE_CODE[piece.type]}.svg`;
 
 const INDICES = Array.from({ length: 8 }, (_, i) => i);
 
@@ -77,7 +65,7 @@ export const ChessBoard = ({
 const Piece = ({ piece }: { piece: ChessPiece }) => (
   <img
     className={styles.piece}
-    src={pieceUrl(piece)}
+    src={pieceImageUrl(piece)}
     alt={`${piece.color} ${piece.type}`}
     draggable={false}
   />

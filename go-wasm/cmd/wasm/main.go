@@ -35,9 +35,14 @@ func getBoardJS(_ js.Value, _ []js.Value) interface{} {
 }
 
 func makeMoveJS(_ js.Value, args []js.Value) interface{} {
-	engine.MakeMovement(args[0].Int(), args[1].Int())
+	promotion := 0
+	if len(args) > 2 && !args[2].IsUndefined() && args[2].Type() == js.TypeNumber {
+		promotion = args[2].Int()
+	}
+	engine.MakeMovement(args[0].Int(), args[1].Int(), promotion)
 	return getBoard()
 }
+
 //rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1
 
 func initBoardJs(_ js.Value, _ []js.Value) interface{} {

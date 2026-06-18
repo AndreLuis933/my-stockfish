@@ -32,4 +32,5 @@ type Board [64]Piece
 type Move struct {
 	From int `json:"from"`
 	To   int `json:"to"`
+	Promotion *Piece `json:"promotion,omitempty"`
 }
