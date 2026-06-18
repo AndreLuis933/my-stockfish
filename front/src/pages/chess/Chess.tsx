@@ -62,10 +62,6 @@ export const Chess = () => {
         checkSquare={checkSquare}
       />
 
-      <div className={styles.engineNotice}>
-        Engine Go em desenvolvimento — movimentos ainda não validados
-      </div>
-
       <div className={styles.actions}>
         <button className={styles.actionButton} onClick={restartGame}>
           Reiniciar

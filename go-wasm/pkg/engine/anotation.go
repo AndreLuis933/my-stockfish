@@ -14,6 +14,7 @@ var pieceFromLetter = map[byte]types.Piece{
 }
 
 func LoadFen(fen string) {
+	Board = types.Board{}
 	fields := strings.Fields(fen)
 	ranks := strings.Split(fields[0], "/")
 	for i, rank := range ranks {

@@ -47,7 +47,7 @@ func makeMoveJS(_ js.Value, args []js.Value) interface{} {
 	if len(args) > 2 && !args[2].IsUndefined() && args[2].Type() == js.TypeNumber {
 		promotion = args[2].Int()
 	}
-	engine.MakeMovement(args[0].Int(), args[1].Int(), promotion)
+	engine.MakeMove(args[0].Int(), args[1].Int(), promotion)
 	return getBoard()
 }
 

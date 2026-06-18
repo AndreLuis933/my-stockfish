@@ -35,12 +35,12 @@ my-stockfish/
 │       │   │   ├── Checkers.tsx
 │       │   │   └── Checkers.module.css
 │       │   └── chess/             # Route /chess
-│       │       ├── Chess.tsx              # Renders board, turn banner, promotion picker, result overlay
-│       │       ├── Chess.hooks.ts         # useChess: state machine bridging React ↔ Go WASM
+│       │       ├── Chess.tsx              # Renders board, turn banner, promotion picker, "Xeque!" badge, result overlay
+│       │       ├── Chess.hooks.ts         # useChess: state machine bridging React ↔ Go WASM (checkSquare, result from engine.gameStatus())
 │       │       └── Chess.module.css
 │       ├── components/
 │       │   ├── Board/             # Checkers board UI (Board.tsx + Board.module.css)
-│       │   ├── ChessBoard/        # Chess board UI (cburnett SVG pieces, selection + move hints)
+│       │   ├── ChessBoard/        # Chess board UI (cburnett SVG pieces, selection + move hints + check glow)
 │       │   ├── PromotionPicker/   # Pawn promotion modal: Q/N/R/B picker using piece SVGs
 │       │   └── Nav/               # Top nav bar (links to /checkers and /chess)
 │       ├── hooks/useGame.ts       # Checkers state machine (uses TS AI)
@@ -55,21 +55,27 @@ my-stockfish/
 │       └── assets/                # Static images (hero, react/vite svg)
 ├── go-wasm/                        # Go source compiled to WASM (module: webassemble, go 1.25)
 │   ├── cmd/
-│   │   ├── wasm/main.go           # WASM entry: registers goWasmEngine.{validMovesChess, initBoard, makeMove}
-│   │   └── command/main.go        # CLI debug entry: loads FEN, prints valid moves
+│   │   ├── wasm/main.go           # WASM entry: registers goWasmEngine.{validMovesChess, initBoard, makeMove, isCheckJS, gameStatus}
+│   │   └── command/main.go        # CLI debug entry: loads FEN, runs Perft depths 1-5
 │   ├── pkg/
-│   │   ├── types/types.go         # Piece uint8 (type bits + color bits), Move struct {From, To, *Promotion}
+│   │   ├── types/types.go         # Piece uint8 (type bits + color bits), CastlingRights uint8 (KQkq), Move struct, Piece methods
 │   │   └── engine/                # Chess logic (pure Go, no JS deps)
-│   │       ├── board.go           # Board [64]Piece, enPassant state, inBounds, abs, PiecePtr
-│   │       ├── anotation.go       # LoadFen(): parse FEN string → Board
+│   │       ├── board.go           # Board [64]Piece, enPassant state, whiteToMove, castlingRights, oppositeColor, isWhite, KingCheck(), Perft()
+│   │       ├── anotation.go       # LoadFen(): parse FEN → Board, turn (w/b), castling rights (KQkq)
 │   │       ├── print.go           # PrintBoard(): ASCII debug print
-│   │       ├── moves.go           # GetValidMoves(): iterate board, dispatch per piece type
+│   │       ├── moves.go           # getPseudoLegalMoves(): iterate board, dispatch per piece type, filtered by turn
 │   │       ├── move_pawn.go       # Pawn moves: forward, double, captures, en passant, promotion (4 moves)
 │   │       ├── move_knight.go     # Knight L-jumps with row/col diff validation
 │   │       ├── move_bishop.go     # Bishop diagonal slides
 │   │       ├── move_rook.go       # Rook orthogonal slides
-│   │       ├── move_king.go       # King one-step in all 8 directions
-│   │       └── move_apply.go      # MakeMovement(from, to, promotion): applies move, sets en passant state
+│   │       ├── move_king.go       # King one-step + castling (kingside/queenside, with attack-path checks)
+│   │       ├── move_apply.go      # MakeMove(from, to, promotion): applies move, sets en passant, castling rook move, clears rights, flips whiteToMove
+│   │       ├── attacks.go         # FindKing, IsSquareAttacked (reverse-scan), IsInCheck
+│   │       ├── legal.go           # GetValidMoves(): pseudo-legal → snapshot/make/restore filter (state stack for recursion), drops moves leaving own king in check
+│   │       ├── status.go          # GameStatus enum + CurrentStatus(): playing / white-wins / black-wins / draw (checkmate & stalemate)
+│   │       ├── legal_test.go      # Tests: FEN loading, castling rights, legal move counts, pins, en-passant discovered check, king-in-check
+│   │       ├── status_test.go     # Tests: CurrentStatus (playing, fool's mate, stalemate, back-rank mate), GameStatus.String/IsGameOver
+│   │       └── perft_test.go      # Tests: Perft on all 6 chessprogramming.org standard positions (initial, Kiwipete, Pos3-6)
 │   ├── tools/main.go              # Type generator: Go AST + type-checker → wasm-contract.ts
 │   └── bin/gen-types.exe          # Compiled type generator binary
 ├── AGENTS.md                       # This file
@@ -91,9 +97,16 @@ my-stockfish/
 
 **Xadrez (Chess)**
 - Game runs in the browser via Go WASM: human-vs-human (human-vs-ai mode exists but AI is not yet implemented for chess)
-- Go engine handles: board representation, FEN loading, move generation for all piece types, captures, en passant, pawn promotion
+- Go engine handles: board representation, FEN loading (with turn + castling rights), move generation for all piece types, captures, en passant, pawn promotion, **castling**
+- **Castling**: implemented in Go — kingside & queenside for both colors; all 6 FIDE conditions checked (rights, empty path, king not in check, king path not attacked, king destination not attacked); rook moves with the king on `MakeMove`; castling rights cleared on king/rook moves and rook captures
+- **Legal move filtering**: pseudo-legal moves are filtered by snapshot/make/restore (state stack for recursion) — pins, en-passant discovered checks, and king-moves-into-check are all handled automatically
+- **Check detection**: `IsSquareAttacked` (reverse-scan from a square) + `IsInCheck` (king square attacked) + `KingCheck()` exposed to the frontend as `isCheckJS` → returns the checked king's square index or -1
+- **Game status**: `CurrentStatus()` returns `playing | white-wins | black-wins | draw` (checkmate = no legal moves + in check, stalemate = no legal moves + not in check), exposed as `gameStatus`
+- **Perft validation**: `Perft()` runs recursive move enumeration; validated against all 6 standard positions from chessprogramming.org/Perft_Results (initial position through depth 5 = 4,865,609 nodes; Kiwipete; Positions 3-6)
 - Pawn promotion: when a pawn reaches the last rank, a `PromotionPicker` modal lets the user choose Q/N/R/B; the chosen piece byte is sent to `engine.makeMove(from, to, promotionByte)`
 - Move validation: clicking a piece queries `engine.validMovesChess()` (JSON of `{from, to, promotion?}[]`), highlights legal targets
+- **Check highlight**: when `isCheckJS` returns a square, the king's square glows red (pulsing animation) and a "Xeque!" badge appears in the turn banner
+- **Result overlay**: "Brancas vencem!" / "Pretas vencem!" / "Empate!" shown when `gameStatus` returns a terminal status
 - Board flip, turn banner, result overlay
 
 **WASM infrastructure**
@@ -107,10 +120,7 @@ my-stockfish/
 
 | Piece | Notes |
 |---|---|
-| Chess AI | No minimax/alpha-beta in Go yet. `human-vs-ai` mode is defined but black doesn't move automatically in chess. |
-| Check/checkmate detection | Go move generation does not filter out moves that leave own king in check; no checkmate/stalemate result logic. |
-| Castling | Not implemented in Go move generation. |
-| King/Queen move generation edge cases | King has no castling; queen = rook + bishop (correct). King doesn't validate moving into check. |
+| Chess AI | No minimax/alpha-beta in Go yet. `human-vs-ai` mode is defined but black doesn't move automatically in chess. `CurrentStatus()` is ready for the AI to detect terminal nodes. |
 | Type generator auto-run | The Vite plugin does **not** run the type generator automatically — it only builds the WASM and sends HMR. `wasm-contract.ts` is maintained by hand; run `gen-types.exe` only if you want to regenerate a starting point. |
 | Optional arg in contract | The generator emits all params as required. `makeMove`'s 3rd arg (`promotion`) was manually marked optional (`number?`) in `wasm-contract.ts`. Re-apply optionality if you regenerate. |
 | Checkers → Go | Checkers logic stays in TypeScript for now; no plan to port it to Go. |
@@ -138,6 +148,8 @@ React component
 | `validMovesChess` | `getValidMovesJS` | `engine.GetValidMoves()` | — | JSON string of `Move[]` |
 | `initBoard` | `initBoardJs` | `engine.LoadFen("rnbqkbnr/...")` | — | `number[]` (64 board bytes) |
 | `makeMove` | `makeMoveJS` | `engine.MakeMovement(from, to, promotion)` | `number, number, number?` | `number[]` (64 board bytes) |
+| `isCheckJS` | `isCheckJS` | `engine.KingCheck()` | — | `number` (checked king's square index, or -1) |
+| `gameStatus` | `gameStatusJS` | `engine.CurrentStatus().String()` | — | `string` (`"playing"` \| `"white-wins"` \| `"black-wins"` \| `"draw"`) |
 
 ### Piece byte encoding (shared between Go and TS)
 
@@ -149,6 +161,18 @@ bits 6-7: color
 ```
 
 `Move.Promotion` is a `*Piece` (color bits | type bits) — only set for pawn promotion moves. The Go engine emits 4 separate moves per promotable pawn push (Q, N, B, R), each with a different `Promotion` byte. The frontend collects these into a `PendingPromotion` and shows the picker.
+
+### Castling rights encoding
+
+```
+CastlingRights uint8 bitmask:
+  bit 0: CastleWhiteK  (white kingside,  e1→g1,  rook h1→f1)
+  bit 1: CastleWhiteQ  (white queenside, e1→c1,  rook a1→d1)
+  bit 2: CastleBlackK  (black kingside,  e8→g8,  rook h8→f8)
+  bit 3: CastleBlackQ  (black queenside, e8→c8,  rook a8→d8)
+```
+
+Parsed from FEN field 2 (`KQkq` or `-`) by `LoadFen`. Castling generation is implemented in `move_king.go` (kingside & queenside for both colors); rights are cleared in `MakeMove` on king moves, rook moves from corners, and rook captures on corners.
 
 ### Type safety pipeline
 
@@ -208,3 +232,15 @@ $env:GOOS="js"; $env:GOARCH="wasm"; go build -o ../front/public/wasm/engine.wasm
 - `worker.js` must be plain JavaScript (no bundler) — it runs inside a Web Worker with no import support unless using `importScripts`.
 - `wasm_exec.js` is copied from `GOROOT/lib/wasm/wasm_exec.js` by the Vite plugin on build — do not edit it.
 - All user-facing text is in Portuguese (pt-BR). All code (variables, functions, files) is in English.
+
+## Documentation — update rule
+
+- When asked to "update the docs", update **only** the root `README.md` and `AGENTS.md`.
+- When asked to "update all the docs", update **ALL** of these files to keep them in sync:
+
+  1. **`AGENTS.md`** (root) — project state, architecture, repository layout, registered functions, encoding, rules
+  2. **`README.md`** (root) — project overview, stack, getting started, current state summary
+  3. **`front/README.md`** — frontend structure, WASM integration, UI features, registered JS functions
+  4. **`go-wasm/README.md`** — engine structure, piece/castling encoding, perft validation, JS bridge table
+
+Update each file's relevant section based on what changed (new files, new functions, new features, changed architecture, test results, etc.). Do not skip any of the four files on an "all" update — they are the canonical documentation set.

@@ -1,64 +1,83 @@
-# Damas Brasileiras + Xadrez
+# Front — Damas Brasileiras + Xadrez
 
-Two board games in one React app:
+React 19 + TypeScript (strict) + Vite (Bun) frontend for two board games:
 
 - **Damas Brasileiras** (Brazilian Checkers) — fully playable, AI in TypeScript
-- **Xadrez** (Chess) — playable, move generation runs in Go compiled to WebAssembly
+- **Xadrez** (Chess) — playable, move generation and board state run in Go compiled to WebAssembly
+
+---
 
 ## Stack
 
 | Layer | Tech |
 |---|---|
-| Frontend | React 19 + TypeScript (strict) + Vite + CSS Modules |
+| Framework | React 19 |
+| Language | TypeScript (strict mode) |
+| Bundler | Vite |
+| Styling | CSS Modules |
 | Routing | react-router-dom v7 |
 | Package manager | Bun |
 | Checkers AI | TypeScript — Minimax + Alpha-Beta + IDDFS (depth 8) |
-| Chess engine | Go 1.25 → WebAssembly (move generation, FEN, en passant, promotion) |
+| Chess engine | Go 1.25 → WebAssembly (loaded via Web Worker) |
+
+---
 
 ## Getting started
 
+### Prerequisites
+
+- [Bun](https://bun.sh)
+- [Go 1.25+](https://go.dev/dl/) (WASM build step — the Vite plugin calls `go build` directly)
+
+### Install and run
+
 ```bash
-# Install dependencies
 bun install
-
-# Start dev server (also compiles Go WASM and watches .go files)
-bun dev
-
-# Type-check + lint
-bun run check
-
-# Tests
-bun test
+bun dev          # dev server — also builds WASM and watches .go files
 ```
 
-Requires Go installed on the machine for the WASM build step.
+Open the dev server URL. Routes:
+
+- `/` → redirects to `/checkers`
+- `/checkers` — Damas Brasileiras
+- `/chess` — Xadrez
+
+### Other commands
+
+```bash
+bun run check     # tsc -b && eslint:strict (run after every change)
+bun test          # vitest
+bun run build     # tsc -b && vite build (also builds WASM with prod flags)
+```
+
+---
 
 ## Project structure
 
 ```
 src/
 ├── components/
-│   ├── Board/             # Checkers board UI
-│   ├── ChessBoard/        # Chess board UI (cburnett SVG pieces)
+│   ├── Board/             # Checkers board UI (Board.tsx + Board.module.css)
+│   ├── ChessBoard/        # Chess board UI (cburnett SVG pieces, selection + move hints + check glow)
 │   ├── PromotionPicker/   # Pawn promotion modal (Q/N/R/B)
 │   └── Nav/               # Top nav bar
 ├── pages/
-│   ├── checkers/          # Route /checkers
-│   └── chess/             # Route /chess (Chess.tsx + Chess.hooks.ts + .module.css)
-├── hooks/useGame.ts       # Checkers state machine
+│   ├── checkers/          # Route /checkers (Checkers.tsx + Checkers.module.css)
+│   └── chess/             # Route /chess (Chess.tsx + Chess.hooks.ts + Chess.module.css)
+├── hooks/useGame.ts       # Checkers state machine (uses TS AI)
 ├── utils/
 │   ├── gameEngine.ts      # Checkers: move gen, captures, flying kings, applyMove
 │   ├── aiEngine.ts        # Checkers AI: Minimax + Alpha-Beta + IDDFS
 │   ├── chessEngine.ts     # Chess: emptyBoard(), pieceByte(), square helpers
 │   └── chessAssets.ts     # pieceImageUrl() → cburnett SVG path
 ├── types/
-│   ├── game.ts            # Checkers types
-│   └── chess.ts           # Chess types + getPiece/decodePieceByte
-└── wasm/
-    ├── generated/         # Hand-maintained TS contract — edit directly
-    │   └── wasm-contract.ts
-    ├── loader.ts          # WasmWorkerEngine (Web Worker bridge to Go WASM)
-    └── useWasm.ts         # React hook: { engine, loading, error, restarting }
+│   ├── game.ts            # Checkers types (Color, PieceType, Piece, Cell, Board, Move)
+│   └── chess.ts           # Chess types (ChessColor, ChessPiece, ChessBoard, getPiece, decodePieceByte)
+├── wasm/
+│   ├── generated/wasm-contract.ts   # Hand-maintained TS contract for Go functions (edit directly)
+│   ├── loader.ts                    # WasmWorkerEngine (Web Worker bridge, typed async calls)
+│   └── useWasm.ts                   # React hook: { engine, loading, error, restarting } + HMR restart
+└── assets/                # Static images
 
 plugins/
 └── go-wasm.ts            # Vite plugin: builds WASM, copies wasm_exec.js, watches .go, sends HMR
@@ -66,10 +85,71 @@ plugins/
 public/
 ├── wasm/
 │   ├── engine.wasm        # Compiled Go binary (gitignored)
-│   ├── wasm_exec.js       # Go WASM runtime (copied from GOROOT)
-│   └── worker.js          # Web Worker: loads runtime + wasm, dispatches calls
+│   ├── wasm_exec.js       # Go WASM runtime (copied from GOROOT at build time)
+│   └── worker.js          # Web Worker: loads runtime + wasm, dispatches { id, fn, args }
 └── pieces/                # Chess piece SVGs (cburnett + chessnut sets)
 ```
+
+---
+
+## Go WASM integration
+
+The chess engine runs in Go compiled to WebAssembly, loaded inside a Web Worker to avoid blocking the UI thread.
+
+### Call flow
+
+```
+React component
+  → useWasm() hook  →  WasmWorkerEngine.makeMove(from, to, promotion)
+    → loader.ts: postMessage({ id, fn: "makeMove", args: [from, to, promotion] })
+      → worker.js: self.goWasmEngine.makeMove(from, to, promotion)
+        → cmd/wasm/main.go: makeMoveJS → engine.MakeMove(from, to, promotion)
+      → worker.js: postMessage({ id, result: [64 board bytes] })
+    → loader.ts: Promise resolves with number[]
+```
+
+### Registered functions (goWasmEngine)
+
+| JS name | Args | Return | Purpose |
+|---|---|---|---|
+| `validMovesChess` | — | JSON string of `{from, to, promotion?}[]` | Legal moves for the side to move |
+| `initBoard` | — | `number[]` (64 bytes) | Reset to starting position |
+| `makeMove` | `number, number, number?` | `number[]` (64 bytes) | Apply a move; optional promotion byte |
+| `isCheckJS` | — | `number` | Checked king's square index, or -1 |
+| `gameStatus` | — | `string` | `"playing" \| "white-wins" \| "black-wins" \| "draw"` |
+
+### Vite plugin (`plugins/go-wasm.ts`)
+
+Handles everything automatically in dev mode:
+- Compiles `engine.wasm` on startup and on production build
+- Copies `wasm_exec.js` from GOROOT
+- Watches `.go` files and rebuilds on change
+- Sends a `wasm-rebuild` HMR event so the browser restarts the WASM worker without a full reload
+
+### Type contract
+
+`wasm-contract.ts` is **hand-maintained** — edit it directly when Go function signatures change. The type generator (`go-wasm/tools/main.go`) is only a starting point and does not run automatically. See `AGENTS.md` for details.
+
+---
+
+## Chess UI features
+
+- **Board**: 8×8 with cburnett SVG piece set, light/dark square colors
+- **Selection**: click a piece to highlight it and show legal move targets (dots for empty, red ring for captures)
+- **Check highlight**: king's square glows red (pulsing animation) when in check; "Xeque!" badge in turn banner
+- **Result overlay**: "Brancas vencem!" / "Pretas vencem!" / "Empate!" shown on game over
+- **Pawn promotion**: picker modal with Q/N/R/B using piece SVGs
+- **Board flip**: toggle board orientation
+- **Turn banner**: shows whose turn it is with colored dots
+
+## Damas (Checkers) features
+
+- **Modes**: Humano vs IA, Humano vs Humano, IA vs IA
+- **Brazilian rules**: mandatory max captures, flying kings, multi-jump chains, 40-move draw rule
+- **AI**: Minimax + Alpha-Beta + IDDFS in TypeScript, depth 8
+- **UI**: board flip, piece counters, "IA pensando..." indicator, must-move highlighting
+
+---
 
 ## Game rules (Damas Brasileiras)
 
@@ -81,43 +161,10 @@ public/
 - Multi-jump chains are required
 - Draw after 40 moves without a capture or man move
 
-## Chess (Xadrez)
+---
 
-- Board state and move generation run in Go compiled to WebAssembly
-- Go engine handles: FEN loading, all piece types, captures, en passant, pawn promotion
-- Pawn promotion shows a picker modal (Q/N/R/B); the chosen piece byte is sent to `engine.makeMove(from, to, promotionByte)`
-- Modes: Humano vs Humano (Humano vs IA mode exists but chess AI is not yet implemented)
+## See also
 
-## Go WASM integration
-
-See `AGENTS.md` at the project root for the full architecture, current state, and what is still missing.
-
-The Vite plugin (`plugins/go-wasm.ts`) handles everything automatically in dev mode:
-- Compiles `engine.wasm` on startup and on production build
-- Copies `wasm_exec.js` from GOROOT
-- Watches `.go` files and rebuilds on change
-- Sends a `wasm-rebuild` HMR event so the browser restarts the WASM worker without a full reload
-
-The type generator (`go-wasm/tools/main.go`) is **not** run automatically and is not part of the normal workflow. `wasm-contract.ts` is hand-maintained — edit it directly when Go function signatures change. Run `gen-types.exe` only if you want a regenerated starting point:
-```bash
-cd go-wasm
-go build -o bin/gen-types.exe tools/main.go
-./bin/gen-types.exe
-```
-
-## Modes
-
-### Damas
-
-| Mode | Description |
-|---|---|
-| Humano vs IA | Player is white; black is controlled by AI |
-| Humano vs Humano | Both sides require a human click |
-| IA vs IA | Both sides play automatically |
-
-### Xadrez
-
-| Mode | Description |
-|---|---|
-| Humano vs Humano | Both sides require a human click |
-| Humano vs IA | Defined but chess AI not yet implemented |
+- [`../README.md`](../README.md) — project overview
+- [`../go-wasm/README.md`](../go-wasm/README.md) — Go chess engine
+- [`../AGENTS.md`](../AGENTS.md) — full architecture, current state, contribution rules

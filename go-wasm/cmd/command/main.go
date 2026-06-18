@@ -7,9 +7,10 @@ import (
 )
 
 func main() {
-	engine.LoadFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
-	moves := engine.GetValidMoves()
-	fmt.Printf("moves: %d\n", len(moves))
-	fmt.Printf("status: %s\n", engine.CurrentStatus().String())
-	fmt.Printf("check: %d\n", engine.KingCheck())
+	fen := "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+	for i := 1; i <= 6; i++ {
+		engine.LoadFen(fen)
+		nodes := engine.Perft(i)
+		fmt.Printf("depth %d  nodes %d\n", i, nodes)
+	}
 }

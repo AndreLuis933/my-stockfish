@@ -55,3 +55,20 @@ func KingCheck() int {
 	}
 	return -1
 }
+func Perft(depth int) int {
+	if depth == 0 {
+		return 1
+	}
+
+	moves := GetValidMoves()
+	nodes := 0
+
+	for _, move := range moves {
+		saveState()
+		MakeMove(move.From, move.To, promotionInt(move.Promotion))
+		nodes += Perft(depth - 1)
+		restoreState()
+	}
+
+	return nodes
+}
