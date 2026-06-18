@@ -1,6 +1,10 @@
 package engine
 
-import "testing"
+import (
+	"testing"
+
+	"webassemble/pkg/types"
+)
 
 func TestCurrentStatusPlaying(t *testing.T) {
 	loadFEN(t, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
@@ -64,12 +68,22 @@ func TestGameStatusIsGameOver(t *testing.T) {
 	}
 }
 
-func TestGameStatusFor(t *testing.T) {
+func TestStatusFor(t *testing.T) {
 	// Helper-level test: no moves + in check → opposite side wins.
-	if got := gameStatusFor(0, nil, true); got != StatusBlackWins {
-		// color 0 here is just a sentinel; the function only uses it to pick winner.
-		// White (ColorWhite=0b01<<6) → if in check with no moves, black wins.
-		// We pass 0 for simplicity; behavior: sideToMoveColor != ColorBlack → black wins.
-		t.Logf("got %s (color 0 is not ColorWhite, so this branch is informational)", got)
+	// White (ColorWhite) in check with no moves → black wins.
+	if got := statusFor(types.ColorWhite, nil, true); got != StatusBlackWins {
+		t.Fatalf("expected black wins, got %s", got)
+	}
+	// Black (ColorBlack) in check with no moves → white wins.
+	if got := statusFor(types.ColorBlack, nil, true); got != StatusWhiteWins {
+		t.Fatalf("expected white wins, got %s", got)
+	}
+	// No moves, not in check → stalemate (draw).
+	if got := statusFor(types.ColorWhite, nil, false); got != StatusDraw {
+		t.Fatalf("expected draw, got %s", got)
+	}
+	// Has moves → playing.
+	if got := statusFor(types.ColorWhite, []types.Move{{From: 0, To: 1}}, false); got != StatusPlaying {
+		t.Fatalf("expected playing, got %s", got)
 	}
 }

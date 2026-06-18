@@ -2,22 +2,30 @@ package engine
 
 import "webassemble/pkg/types"
 
-func FindKing(color types.Piece) int {
-	for i, p := range Board {
-		if p&types.TypeMask == types.King && p.Color() == color {
+// FindKing returns the board index of the king of the given color, or -1.
+func (p *Position) FindKing(color types.Piece) int {
+	for i, piece := range p.Board {
+		if piece&types.TypeMask == types.King && piece.Color() == color {
 			return i
 		}
 	}
 	return -1
 }
 
-func IsSquareAttacked(idx int, byColor types.Piece) bool {
+// IsSquareAttacked reports whether `idx` is attacked by any piece of `byColor`.
+// It scans outward from the target square (reverse scan): pawn diagonals,
+// knight L-jumps, king one-steps, then rook/bishop sliding rays.
+//
+// Reverse scan (from the target, looking outward) is faster than iterating
+// all enemy pieces because we stop as soon as we find one attacker per ray.
+func (p *Position) IsSquareAttacked(idx int, byColor types.Piece) bool {
 	row, col := idx/boardSize, idx%boardSize
 
-	// 1. Pawn attacks — byColor pawns sit one rank "behind" relative to their direction
-	pawnRowOffset := -1 // white pawns attack upward, so they sit at idx-7/-9
+	// 1. Pawn attacks — a pawn of `byColor` sits one rank "behind" its attack
+	//    direction. White pawns attack upward, so they sit at idx-9 / idx-7.
+	pawnRowOffset := -1
 	if byColor == types.ColorBlack {
-		pawnRowOffset = 1 // black pawns attack downward, sit at idx+7/+9
+		pawnRowOffset = 1
 	}
 	for dc := -1; dc <= 1; dc += 2 {
 		r, c := row+pawnRowOffset, col+dc
@@ -25,12 +33,12 @@ func IsSquareAttacked(idx int, byColor types.Piece) bool {
 			continue
 		}
 		t := r*boardSize + c
-		if Board[t].TypePiece() == types.Pawn && Board[t].Color() == byColor {
+		if p.Board[t].TypePiece() == types.Pawn && p.Board[t].Color() == byColor {
 			return true
 		}
 	}
 
-	// 2. Knight — reuse knightDirections + row/col diff validation (same as move_knight.go)
+	// 2. Knight L-jumps.
 	for _, dir := range knightDirections {
 		t := idx + dir
 		if !inBounds(t) {
@@ -38,25 +46,26 @@ func IsSquareAttacked(idx int, byColor types.Piece) bool {
 		}
 		if abs(t/boardSize-row) == 2 && abs(t%boardSize-col) == 1 ||
 			abs(t/boardSize-row) == 1 && abs(t%boardSize-col) == 2 {
-			if Board[t].TypePiece() == types.Knight && Board[t].Color() == byColor {
+			if p.Board[t].TypePiece() == types.Knight && p.Board[t].Color() == byColor {
 				return true
 			}
 		}
 	}
 
-	// 3. King — 8 adjacent
+	// 3. King one-step (8 adjacent squares).
 	for _, dir := range kingDirections {
 		t := idx + dir
 		if !inBounds(t) {
 			continue
 		}
 		if abs(t/boardSize-row) <= 1 && abs(t%boardSize-col) <= 1 {
-			if Board[t].TypePiece() == types.King && Board[t].Color() == byColor {
+			if p.Board[t].TypePiece() == types.King && p.Board[t].Color() == byColor {
 				return true
 			}
 		}
 	}
 
+	// 4. Rook / Queen sliding (orthogonal rays).
 	for _, dir := range rookDirections {
 		isHorizontal := dir == -1 || dir == 1
 
@@ -64,33 +73,34 @@ func IsSquareAttacked(idx int, byColor types.Piece) bool {
 			if isHorizontal && target/boardSize != row {
 				break
 			}
-			if Board[target] == 0 {
+			if p.Board[target] == 0 {
 				continue
 			}
 
-			if (Board[target].TypePiece() == types.Rook || Board[target].TypePiece() == types.Queen) && Board[target].Color() == byColor {
+			if (p.Board[target].TypePiece() == types.Rook || p.Board[target].TypePiece() == types.Queen) && p.Board[target].Color() == byColor {
 				return true
 			}
 			break
 		}
 	}
 
+	// 5. Bishop / Queen sliding (diagonal rays).
 	for _, dir := range bishopDirections {
 		prevCol := idx % boardSize
 
 		for target := idx + dir; inBounds(target); target += dir {
-			atuCol := target % boardSize
+			curCol := target % boardSize
 
-			if abs(atuCol-prevCol) != 1 {
+			if abs(curCol-prevCol) != 1 {
 				break
 			}
-			prevCol = atuCol
+			prevCol = curCol
 
-			if Board[target] == 0 {
+			if p.Board[target] == 0 {
 				continue
 			}
 
-			if (Board[target].TypePiece() == types.Bishop || Board[target].TypePiece() == types.Queen) && Board[target].Color() == byColor {
+			if (p.Board[target].TypePiece() == types.Bishop || p.Board[target].TypePiece() == types.Queen) && p.Board[target].Color() == byColor {
 				return true
 			}
 			break
@@ -99,10 +109,11 @@ func IsSquareAttacked(idx int, byColor types.Piece) bool {
 	return false
 }
 
-func IsInCheck(color types.Piece) bool {
-	kingIdx := FindKing(color)
+// IsInCheck returns true if the king of `color` is currently attacked.
+func (p *Position) IsInCheck(color types.Piece) bool {
+	kingIdx := p.FindKing(color)
 	if kingIdx == -1 {
 		return false
 	}
-	return IsSquareAttacked(kingIdx, oppositeColor(color))
+	return p.IsSquareAttacked(kingIdx, oppositeColor(color))
 }

@@ -7,7 +7,14 @@ import (
 	"webassemble/pkg/types"
 )
 
+// PrintBoard prints the global Game position as an 8x8 ASCII grid (debug only).
 func PrintBoard() {
+	Game.PrintBoard()
+}
+
+// PrintBoard prints this position as an 8x8 ASCII grid (debug only).
+// Uppercase = white, lowercase = black, '.' = empty.
+func (p *Position) PrintBoard() {
 	letters := map[types.Piece]byte{
 		types.Pawn:   'p',
 		types.Knight: 'n',
@@ -19,7 +26,7 @@ func PrintBoard() {
 
 	for row := 0; row < 8; row++ {
 		for col := 0; col < 8; col++ {
-			piece := Board[row*8+col]
+			piece := p.Board[row*8+col]
 			letter := letters[piece&types.TypeMask]
 
 			if letter == 0 {

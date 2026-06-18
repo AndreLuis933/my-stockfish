@@ -77,10 +77,10 @@ func TestPerftPosition6(t *testing.T) {
 
 func runPerft(t *testing.T, fen string, want map[int]int) {
 	t.Helper()
-	resetState()
+	Game.reset()
 	LoadFen(fen)
 	for depth, expected := range want {
-		got := Perft(depth)
+		got := Game.Perft(depth)
 		if got != expected {
 			t.Errorf("perft(%d) = %d, want %d (fen: %s)", depth, got, expected, fen)
 		}

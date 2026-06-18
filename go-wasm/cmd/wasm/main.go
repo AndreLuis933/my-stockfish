@@ -12,7 +12,7 @@ func getBoard() interface{} {
 	jsArray := js.Global().Get("Uint8Array").New(64)
 
 	buf := make([]byte, 64)
-	for i, p := range engine.Board {
+	for i, p := range engine.Game.Board {
 		buf[i] = byte(p)
 	}
 
@@ -21,7 +21,7 @@ func getBoard() interface{} {
 }
 
 func getValidMovesJS(_ js.Value, args []js.Value) interface{} {
-	moves := engine.GetValidMoves() // []Move
+	moves := engine.Game.LegalMoves()
 
 	data, err := json.Marshal(moves)
 	if err != nil {
@@ -54,7 +54,7 @@ func makeMoveJS(_ js.Value, args []js.Value) interface{} {
 //rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1
 
 func initBoardJs(_ js.Value, _ []js.Value) interface{} {
-	engine.LoadFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
+	engine.LoadFen(engine.StartingFEN)
 	return getBoard()
 }
 

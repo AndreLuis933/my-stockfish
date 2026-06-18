@@ -1,15 +1,12 @@
 package engine
 
-import "webassemble/pkg/types"
-
-var Board types.Board
+import (
+	"webassemble/pkg/types"
+)
 
 const boardSize = 8
 
-var enPassantCapture = -1
-var enPassantTarget = -1
-var whiteToMove bool
-var castlingRights types.CastlingRights
+// Pure helpers (no state) -------------------------------------------------
 
 func abs(n int) int {
 	if n < 0 {
@@ -22,53 +19,46 @@ func inBounds(idx int) bool {
 	return idx >= 0 && idx < boardSize*boardSize
 }
 
-func PiecePtr(p types.Piece) *types.Piece { return &p }
-
 func oppositeColor(color types.Piece) types.Piece {
 	if color&types.ColorMask == types.ColorBlack {
 		return types.ColorWhite
 	}
 	return types.ColorBlack
-
 }
 
-func PieceColor(color types.Piece) types.Piece {
+// colorOfSide returns the Piece color bits for the side to move.
+func (p *Position) colorOfSide() types.Piece {
+	if p.WhiteToMove {
+		return types.ColorWhite
+	}
+	return types.ColorBlack
+}
+
+// TODO: remove once move generators are migrated (duplicate of oppositeColor).
+func pieceColor(color types.Piece) types.Piece {
 	if color&types.ColorMask == types.ColorBlack {
 		return types.ColorBlack
 	}
 	return types.ColorWhite
-
 }
 
-func isWhite(white bool) types.Piece {
-	if white {
-		return types.ColorWhite
-	} else {
-		return types.ColorBlack
-	}
-}
+// Legacy helpers (to be deleted after full migration) --------------------
 
+func PiecePtr(p types.Piece) *types.Piece { return &p }
+
+// KingCheck returns the square index of the side-to-move king if it is in
+// check, or -1 otherwise. Exposed to the frontend as `isCheckJS`.
 func KingCheck() int {
-	color := isWhite(whiteToMove)
-	if IsInCheck(color) {
-		return FindKing(color)
+	color := Game.colorOfSide()
+	if Game.IsInCheck(color) {
+		return Game.FindKing(color)
 	}
 	return -1
 }
+
+// Perft counts the number of leaf nodes at the given depth from the current
+// Game position. Used for move-generation validation and as a performance
+// baseline. Will move to a method on *Position and use Make/Unmake later.
 func Perft(depth int) int {
-	if depth == 0 {
-		return 1
-	}
-
-	moves := GetValidMoves()
-	nodes := 0
-
-	for _, move := range moves {
-		saveState()
-		MakeMove(move.From, move.To, promotionInt(move.Promotion))
-		nodes += Perft(depth - 1)
-		restoreState()
-	}
-
-	return nodes
+	return Game.Perft(depth)
 }
