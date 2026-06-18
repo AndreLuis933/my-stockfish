@@ -1,73 +1,82 @@
-# React + TypeScript + Vite
+# Damas Brasileiras
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Brazilian Checkers game — React + TypeScript frontend with a Go engine compiled to WebAssembly.
 
-Currently, two official plugins are available:
+## Stack
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+| Layer | Tech |
+|---|---|
+| Frontend | React 19 + TypeScript (strict) + Vite + CSS Modules |
+| Package manager | Bun |
+| AI engine (current) | TypeScript — Minimax + Alpha-Beta + IDDFS |
+| AI engine (target) | Go → WASM |
 
-## React Compiler
+## Getting started
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+```bash
+# Install dependencies
+bun install
 
-## Expanding the ESLint configuration
+# Start dev server (also compiles Go WASM and watches .go files)
+bun dev
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+# Type-check + lint
+bun run check
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+# Tests
+bun test
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Requires Go installed on the machine for the WASM build step.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## Project structure
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
 ```
+src/
+├── components/Board/     # Board UI (Board.tsx + Board.module.css)
+├── hooks/useGame.ts      # Game state machine — board, turns, AI trigger
+├── utils/
+│   ├── gameEngine.ts     # Board logic: move generation, applyMove, computeTurnState
+│   └── aiEngine.ts       # Minimax + Alpha-Beta + IDDFS
+├── types/game.ts         # Color, PieceType, Piece, Cell, Board, Move
+└── wasm/
+    ├── generated/        # AUTO-GENERATED — do not edit
+    │   └── wasm-contract.ts
+    ├── loader.ts         # WasmWorkerEngine (Web Worker bridge to Go WASM)
+    └── useWasm.ts        # React hook: { engine, loading, error, restarting }
+
+plugins/
+└── go-wasm.ts            # Vite plugin: builds WASM, generates TS types, sends HMR events
+
+public/wasm/
+├── engine.wasm           # Compiled Go binary
+└── wasm_exec.js          # Go WASM runtime (copied from GOROOT at build time)
+```
+
+## Game rules (Damas Brasileiras)
+
+- 8×8 board, 12 pieces per side
+- Men move and capture forward diagonally
+- Captures are mandatory; must take the maximum number of pieces (Brazilian rule)
+- Men promote to kings on the back rank
+- Kings are **flying kings** — slide any number of squares diagonally, capture at range
+- Multi-jump chains are required
+- Draw after 40 moves without a capture or man move
+
+## Go WASM integration
+
+See `AGENTS.md` at the project root for the full architecture, current state, and what is still missing.
+
+The Vite plugin (`plugins/go-wasm.ts`) handles everything automatically in dev mode:
+- Compiles `engine.wasm` on startup
+- Watches `.go` files and rebuilds on change
+- Re-generates `src/wasm/generated/wasm-contract.ts` from Go types
+- Sends a `wasm-rebuild` HMR event so the browser restarts the WASM worker without a full reload
+
+## Modes
+
+| Mode | Description |
+|---|---|
+| Humano vs IA | Player is white; black is controlled by AI |
+| Humano vs Humano | Both sides require a human click |
+| IA vs IA | Both sides play automatically |
