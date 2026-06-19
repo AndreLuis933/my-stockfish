@@ -37,7 +37,8 @@ func MakeMove(from, to, promotion int) {
 	Game.Make(move)
 }
 
-// Make applies a fully-populated move to this position.
+// Make applies a fully-populated move to this position and pushes undo info
+// onto the undo stack so Unmake can reverse it.
 //
 // It handles, based on move.Flag:
 //   - FlagNormal:      move the piece, capture if Captured != 0
@@ -48,21 +49,36 @@ func MakeMove(from, to, promotion int) {
 //
 // Castling rights are updated when the king or a rook moves, or a rook is
 // captured on its origin corner. The side to move is flipped at the end.
-//
-// This version still uses snapshot/restore for legal-move filtering (see
-// legal.go). Step 3 will add an Unmake method so search can avoid full copies.
 func (p *Position) Make(move types.Move) {
 	from, to := move.From, move.To
 	piece := p.Board[from]
 
-	// Save en passant state before clearing it — the FlagEnPassant case
-	// needs the old EnPassantCapture square to remove the captured pawn.
-	prevEnPassantCapture := p.EnPassantCapture
+	// Record where the captured piece actually sits. For all captures except
+	// en passant, that's `to`. For en passant, the captured pawn is on a
+	// different square (EnPassantCapture).
+	captureSquare := to
+	if move.Flag == types.FlagEnPassant {
+		captureSquare = p.EnPassantCapture
+	}
+
+	// Push undo info so Unmake can restore everything Make changes.
+	p.undoStack = append(p.undoStack, undoInfo{
+		captured:         move.Captured,
+		captureSquare:    captureSquare,
+		enPassantCapture: p.EnPassantCapture,
+		enPassantTarget:  p.EnPassantTarget,
+		castlingRights:   p.CastlingRights,
+	})
+
+	// Clear en passant state every move; only DoublePush sets a new one.
+	// (The old value is already saved in undoInfo above.)
 	p.EnPassantCapture, p.EnPassantTarget = -1, -1
 
 	switch move.Flag {
 	case types.FlagEnPassant:
-		p.Board[prevEnPassantCapture] = 0
+		// Remove the captured pawn (sits on the old EnPassantCapture square),
+		// move our pawn to `to`. The `to` square was empty.
+		p.Board[captureSquare] = 0
 		p.Board[from] = 0
 		p.Board[to] = piece
 
@@ -95,8 +111,8 @@ func (p *Position) Make(move types.Move) {
 		if move.Promotion != nil {
 			p.Board[to] = *move.Promotion
 		} else {
-			// Fallback: if a promotion move was built without a Promotion
-			// piece (e.g. from the raw bridge path), default to Queen.
+			// Fallback: promotion move built without a Promotion piece
+			// (e.g. from the raw bridge path) — default to Queen.
 			p.Board[to] = piece | types.Queen
 		}
 
@@ -129,4 +145,70 @@ func (p *Position) Make(move types.Move) {
 	}
 
 	p.WhiteToMove = !p.WhiteToMove
+}
+
+// Unmake reverses the most recent Make call, restoring the position to its
+// exact pre-move state. It pops from the undo stack.
+//
+// For each flag it undoes the board changes, then restores the saved en
+// passant / castling state. The moving piece is recovered from `to` (for
+// promotions, the pawn is recovered by stripping the promoted type bits and
+// keeping the pawn type + color).
+func (p *Position) Unmake(move types.Move) {
+	from, to := move.From, move.To
+
+	// Flip side to move first — we're now undoing the move of the side that
+	// just moved, so the side to move goes back to them.
+	p.WhiteToMove = !p.WhiteToMove
+
+	// Pop undo info from the stack.
+	n := len(p.undoStack) - 1
+	undo := p.undoStack[n]
+	p.undoStack = p.undoStack[:n]
+
+	// Restore the moving piece to its origin. For promotions, the piece on
+	// `to` is the promoted piece — we need to put the original pawn back on
+	// `from`. The pawn's color is the same as the promoted piece's color.
+	switch move.Flag {
+	case types.FlagEnPassant:
+		// Move our pawn back from `to` to `from`, clear `to` (it was empty),
+		// and put the captured pawn back on its square.
+		pawn := p.Board[to]
+		p.Board[from] = pawn
+		p.Board[to] = 0
+		p.Board[undo.captureSquare] = undo.captured
+
+	case types.FlagCastleK:
+		// Move king back, move rook from f-file back to h-file.
+		p.Board[from] = p.Board[to]
+		p.Board[to] = 0
+		rook := p.Board[to-1]
+		p.Board[to-1] = 0
+		p.Board[to+1] = rook
+
+	case types.FlagCastleQ:
+		// Move king back, move rook from d-file back to a-file.
+		p.Board[from] = p.Board[to]
+		p.Board[to] = 0
+		rook := p.Board[to+1]
+		p.Board[to+1] = 0
+		p.Board[to-2] = rook
+
+	case types.FlagPromotion:
+		// The piece on `to` is the promoted piece. Reconstruct the pawn:
+		// keep the color bits, set the type to Pawn.
+		color := p.Board[to] & types.ColorMask
+		p.Board[from] = color | types.Pawn
+		// Restore captured piece on `to` (or clear it if none).
+		p.Board[to] = undo.captured
+
+	default: // FlagNormal, FlagDoublePush
+		p.Board[from] = p.Board[to]
+		p.Board[to] = undo.captured
+	}
+
+	// Restore the pre-move en passant and castling state.
+	p.EnPassantCapture = undo.enPassantCapture
+	p.EnPassantTarget = undo.enPassantTarget
+	p.CastlingRights = undo.castlingRights
 }

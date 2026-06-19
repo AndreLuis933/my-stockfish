@@ -14,6 +14,21 @@ type Position struct {
 	EnPassantCapture int // square of the pawn that can be captured e.p.; -1 if none
 	HalfmoveClock    int // plies since last pawn move or capture (for 50-move rule)
 	FullmoveNumber   int // increments after black's move
+
+	// undoStack records the state needed to reverse a Make call via Unmake.
+	// Each Make pushes one undoInfo; each Unmake pops it. This is the standard
+	// make/unmake pattern — far faster than copying the whole board per node.
+	undoStack []undoInfo
+}
+
+// undoInfo holds exactly what Make overwrites, so Unmake can restore it.
+// Storing the pre-move values here means we don't need to recompute them.
+type undoInfo struct {
+	captured         types.Piece // piece that was on the capture square (0 if none) — for en passant this is the captured pawn
+	captureSquare    int         // where the captured piece was (== move.To, except en passant)
+	enPassantCapture int         // pre-move EnPassantCapture
+	enPassantTarget  int         // pre-move EnPassantTarget
+	castlingRights   types.CastlingRights // pre-move castling rights
 }
 
 // Game is the single global Position used by the WASM bridge and the legacy
@@ -33,4 +48,5 @@ func (p *Position) reset() {
 	p.EnPassantCapture = -1
 	p.HalfmoveClock = 0
 	p.FullmoveNumber = 0
+	p.undoStack = p.undoStack[:0]
 }

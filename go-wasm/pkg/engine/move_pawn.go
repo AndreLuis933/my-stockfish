@@ -22,7 +22,7 @@ func (p *Position) MovePawn(piece types.Piece, i int, moves []types.Move) []type
 	// Single + double forward push (only if the square is empty).
 	if forward := i + dir; inBounds(forward) && p.Board[forward] == 0 {
 		if row == promotionRow {
-			moves = promotionPawn(i, forward, myColor, moves)
+			moves = promotionPawn(i, forward, myColor, 0, moves)
 		} else {
 			moves = append(moves, types.Move{From: i, To: forward})
 		}
@@ -44,7 +44,7 @@ func (p *Position) MovePawn(piece types.Piece, i int, moves []types.Move) []type
 	if col != boardSize-1 {
 		if t := i + dir + 1; inBounds(t) && (p.Board[t]&enemyColor == enemyColor || (canCaptureEnPassant && t == p.EnPassantTarget)) {
 			if row == promotionRow {
-				moves = promotionPawn(i, t, myColor, moves)
+				moves = promotionPawn(i, t, myColor, p.Board[t], moves)
 			} else if canCaptureEnPassant && t == p.EnPassantTarget {
 				moves = append(moves, types.Move{From: i, To: t, Flag: types.FlagEnPassant, Captured: p.Board[p.EnPassantCapture]})
 			} else {
@@ -57,7 +57,7 @@ func (p *Position) MovePawn(piece types.Piece, i int, moves []types.Move) []type
 	if col != 0 {
 		if t := i + dir - 1; inBounds(t) && (p.Board[t]&enemyColor == enemyColor || (canCaptureEnPassant && t == p.EnPassantTarget)) {
 			if row == promotionRow {
-				moves = promotionPawn(i, t, myColor, moves)
+				moves = promotionPawn(i, t, myColor, p.Board[t], moves)
 			} else if canCaptureEnPassant && t == p.EnPassantTarget {
 				moves = append(moves, types.Move{From: i, To: t, Flag: types.FlagEnPassant, Captured: p.Board[p.EnPassantCapture]})
 			} else {
@@ -70,14 +70,17 @@ func (p *Position) MovePawn(piece types.Piece, i int, moves []types.Move) []type
 }
 
 // promotionPawn appends the four promotion moves (Q, N, B, R) for a pawn
-// reaching the last rank. It is a free function (no Position state needed).
-func promotionPawn(from, to int, color types.Piece, moves []types.Move) []types.Move {
+// reaching the last rank. `captured` is the piece on the destination square
+// (0 for a push promotion, an enemy piece for a capture-promotion) — needed
+// by Unmake to restore the board.
+func promotionPawn(from, to int, color, captured types.Piece, moves []types.Move) []types.Move {
 	for _, promotion := range []types.Piece{types.Queen, types.Knight, types.Bishop, types.Rook} {
 		moves = append(moves, types.Move{
 			From:      from,
 			To:        to,
 			Promotion: PiecePtr(promotion | color),
 			Flag:      types.FlagPromotion,
+			Captured:  captured,
 		})
 	}
 	return moves
