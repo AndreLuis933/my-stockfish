@@ -21,7 +21,7 @@ func getBoard() interface{} {
 }
 
 func getValidMovesJS(_ js.Value, args []js.Value) interface{} {
-	moves := engine.Game.LegalMoves()
+	moves := engine.Game.LegalMovesSlice()
 
 	data, err := json.Marshal(moves)
 	if err != nil {

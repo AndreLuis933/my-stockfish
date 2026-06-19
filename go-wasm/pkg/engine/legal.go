@@ -9,16 +9,28 @@ import "webassemble/pkg/types"
 //
 // This handles pins, en-passant discovered checks, and king-moves-into-check
 // automatically, because we test the actual resulting position.
-func (p *Position) LegalMoves() []types.Move {
-	pseudo := p.PseudoLegalMoves()
+//
+// Writes into the caller-owned MoveList — zero heap allocation.
+func (p *Position) LegalMoves(ml *MoveList) {
+	var pseudo MoveList
+	p.PseudoLegalMoves(&pseudo)
+	ml.Clear()
 	moverColor := p.colorOfSide()
-	legal := make([]types.Move, 0, len(pseudo))
-	for _, m := range pseudo {
+	for i := 0; i < pseudo.n; i++ {
+		m := pseudo.moves[i]
 		p.Make(m)
 		if !p.IsInCheck(moverColor) {
-			legal = append(legal, m)
+			ml.Add(m)
 		}
 		p.Unmake(m)
 	}
-	return legal
+}
+
+// LegalMovesSlice is a convenience wrapper for callers that need a []Move
+// (e.g., JSON marshaling in the WASM bridge). The MoveList escapes to the
+// heap here — use LegalMoves directly in hot paths.
+func (p *Position) LegalMovesSlice() []types.Move {
+	var ml MoveList
+	p.LegalMoves(&ml)
+	return ml.Slice()
 }

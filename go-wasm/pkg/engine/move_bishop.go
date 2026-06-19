@@ -5,9 +5,7 @@ import "webassemble/pkg/types"
 var bishopDirections = []int{-boardSize - 1, -boardSize + 1, boardSize - 1, boardSize + 1}
 
 // MoveBishop slides along the 4 diagonals until it hits a piece or the edge.
-func (p *Position) MoveBishop(piece types.Piece, i int, moves []types.Move) []types.Move {
-	isWhite := piece&types.ColorWhite == types.ColorWhite
-
+func (p *Position) MoveBishop(piece types.Piece, i int, ml *MoveList) {
 	for _, dir := range bishopDirections {
 		prevCol := i % boardSize
 
@@ -20,18 +18,14 @@ func (p *Position) MoveBishop(piece types.Piece, i int, moves []types.Move) []ty
 			prevCol = col
 
 			if p.Board[target] == 0 {
-				moves = append(moves, types.Move{From: i, To: target, Flag: types.FlagNormal})
+				ml.Add(types.Move{From: i, To: target, Flag: types.FlagNormal})
 				continue
 			}
 
-			isEnemy := (isWhite && p.Board[target]&types.ColorBlack == types.ColorBlack) ||
-				(!isWhite && p.Board[target]&types.ColorWhite == types.ColorWhite)
-			if isEnemy {
-				moves = append(moves, types.Move{From: i, To: target, Flag: types.FlagNormal, Captured: p.Board[target]})
+			if piece.IsEnemy(p.Board[target]) {
+				ml.Add(types.Move{From: i, To: target, Flag: types.FlagNormal, Captured: p.Board[target]})
 			}
 			break
 		}
 	}
-
-	return moves
 }

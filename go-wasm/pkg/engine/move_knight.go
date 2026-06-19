@@ -5,8 +5,7 @@ import "webassemble/pkg/types"
 var knightDirections = []int{-6, 6, 10, -10, 17, -17, 15, -15}
 
 // MoveKnight generates the 8 L-shaped jumps, filtered by board edges.
-func (p *Position) MoveKnight(piece types.Piece, i int, moves []types.Move) []types.Move {
-	isWhite := piece&types.ColorWhite == types.ColorWhite
+func (p *Position) MoveKnight(piece types.Piece, i int, ml *MoveList) {
 	startRow, startCol := i/boardSize, i%boardSize
 
 	for _, dir := range knightDirections {
@@ -23,16 +22,12 @@ func (p *Position) MoveKnight(piece types.Piece, i int, moves []types.Move) []ty
 		}
 
 		if p.Board[target] == 0 {
-			moves = append(moves, types.Move{From: i, To: target, Flag: types.FlagNormal})
+			ml.Add(types.Move{From: i, To: target, Flag: types.FlagNormal})
 			continue
 		}
 
-		isEnemy := (isWhite && p.Board[target]&types.ColorBlack == types.ColorBlack) ||
-			(!isWhite && p.Board[target]&types.ColorWhite == types.ColorWhite)
-		if isEnemy {
-			moves = append(moves, types.Move{From: i, To: target, Flag: types.FlagNormal, Captured: p.Board[target]})
+		if piece.IsEnemy(p.Board[target]) {
+			ml.Add(types.Move{From: i, To: target, Flag: types.FlagNormal, Captured: p.Board[target]})
 		}
 	}
-
-	return moves
 }

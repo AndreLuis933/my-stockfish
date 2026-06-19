@@ -5,10 +5,9 @@ import "webassemble/pkg/types"
 // PseudoLegalMoves generates all moves that are legal *ignoring* whether
 // they leave the own king in check. The filtering happens in LegalMoves.
 //
-// This is a method on *Position because it reads p.Board and p.WhiteToMove.
-// The receiver name `p` is the Go convention (short, consistent across files).
-func (p *Position) PseudoLegalMoves() []types.Move {
-	var moves []types.Move
+// Writes into the caller-owned MoveList — zero heap allocation.
+func (p *Position) PseudoLegalMoves(ml *MoveList) {
+	ml.Clear()
 	for i, piece := range p.Board {
 		if piece == 0 || piece.IsWhite() != p.WhiteToMove {
 			continue
@@ -16,19 +15,18 @@ func (p *Position) PseudoLegalMoves() []types.Move {
 
 		switch piece & types.TypeMask {
 		case types.Pawn:
-			moves = p.MovePawn(piece, i, moves)
+			p.MovePawn(piece, i, ml)
 		case types.Rook:
-			moves = p.MoveRook(piece, i, moves)
+			p.MoveRook(piece, i, ml)
 		case types.Bishop:
-			moves = p.MoveBishop(piece, i, moves)
+			p.MoveBishop(piece, i, ml)
 		case types.Queen:
-			moves = p.MoveRook(piece, i, moves)
-			moves = p.MoveBishop(piece, i, moves)
+			p.MoveRook(piece, i, ml)
+			p.MoveBishop(piece, i, ml)
 		case types.King:
-			moves = p.MoveKing(piece, i, moves)
+			p.MoveKing(piece, i, ml)
 		case types.Knight:
-			moves = p.MoveKnight(piece, i, moves)
+			p.MoveKnight(piece, i, ml)
 		}
 	}
-	return moves
 }

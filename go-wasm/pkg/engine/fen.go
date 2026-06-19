@@ -92,9 +92,10 @@ func (p *Position) LoadFen(fen string) {
 		if idx := squareToIndex(fields[3]); idx != -1 {
 			p.EnPassantTarget = idx
 			targetRow := idx / boardSize
-			if targetRow == 2 { // rank 6 → white pushed, pawn one row below (target + 8)
+			switch targetRow {
+			case 2: // rank 6 → white pushed, pawn one row below (target + 8)
 				p.EnPassantCapture = idx + boardSize
-			} else if targetRow == 5 { // rank 3 → black pushed, pawn one row above (target - 8)
+			case 5: // rank 3 → black pushed, pawn one row above (target - 8)
 				p.EnPassantCapture = idx - boardSize
 			}
 		}

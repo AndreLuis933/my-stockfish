@@ -5,8 +5,7 @@ import "webassemble/pkg/types"
 var rookDirections = []int{-boardSize, boardSize, -1, 1}
 
 // MoveRook slides along ranks and files until it hits a piece or the edge.
-func (p *Position) MoveRook(piece types.Piece, i int, moves []types.Move) []types.Move {
-	isWhite := piece&types.ColorWhite == types.ColorWhite
+func (p *Position) MoveRook(piece types.Piece, i int, ml *MoveList) {
 	startRow := i / boardSize
 
 	for _, dir := range rookDirections {
@@ -18,18 +17,14 @@ func (p *Position) MoveRook(piece types.Piece, i int, moves []types.Move) []type
 			}
 
 			if p.Board[target] == 0 {
-				moves = append(moves, types.Move{From: i, To: target, Flag: types.FlagNormal})
+				ml.Add(types.Move{From: i, To: target, Flag: types.FlagNormal})
 				continue
 			}
 
-			isEnemy := (isWhite && p.Board[target]&types.ColorBlack == types.ColorBlack) ||
-				(!isWhite && p.Board[target]&types.ColorWhite == types.ColorWhite)
-			if isEnemy {
-				moves = append(moves, types.Move{From: i, To: target, Flag: types.FlagNormal, Captured: p.Board[target]})
+			if piece.IsEnemy(p.Board[target]) {
+				ml.Add(types.Move{From: i, To: target, Flag: types.FlagNormal, Captured: p.Board[target]})
 			}
 			break
 		}
 	}
-
-	return moves
 }

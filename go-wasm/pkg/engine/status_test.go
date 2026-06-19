@@ -71,19 +71,19 @@ func TestGameStatusIsGameOver(t *testing.T) {
 func TestStatusFor(t *testing.T) {
 	// Helper-level test: no moves + in check → opposite side wins.
 	// White (ColorWhite) in check with no moves → black wins.
-	if got := statusFor(types.ColorWhite, nil, true); got != StatusBlackWins {
+	if got := statusFor(types.ColorWhite, 0, true); got != StatusBlackWins {
 		t.Fatalf("expected black wins, got %s", got)
 	}
 	// Black (ColorBlack) in check with no moves → white wins.
-	if got := statusFor(types.ColorBlack, nil, true); got != StatusWhiteWins {
+	if got := statusFor(types.ColorBlack, 0, true); got != StatusWhiteWins {
 		t.Fatalf("expected white wins, got %s", got)
 	}
 	// No moves, not in check → stalemate (draw).
-	if got := statusFor(types.ColorWhite, nil, false); got != StatusDraw {
+	if got := statusFor(types.ColorWhite, 0, false); got != StatusDraw {
 		t.Fatalf("expected draw, got %s", got)
 	}
 	// Has moves → playing.
-	if got := statusFor(types.ColorWhite, []types.Move{{From: 0, To: 1}}, false); got != StatusPlaying {
+	if got := statusFor(types.ColorWhite, 1, false); got != StatusPlaying {
 		t.Fatalf("expected playing, got %s", got)
 	}
 }

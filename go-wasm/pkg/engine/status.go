@@ -29,8 +29,8 @@ func (s GameStatus) IsGameOver() bool {
 // statusFor inspects the position for the side that has the move.
 // If that side has no legal moves: in check → checkmate (other side wins),
 // not in check → stalemate (draw). Otherwise the game is still going.
-func statusFor(sideToMoveColor types.Piece, moves []types.Move, inCheck bool) GameStatus {
-	if len(moves) > 0 {
+func statusFor(sideToMoveColor types.Piece, moveCount int, inCheck bool) GameStatus {
+	if moveCount > 0 {
 		return StatusPlaying
 	}
 	if inCheck {
@@ -51,7 +51,8 @@ func CurrentStatus() GameStatus {
 // CurrentStatus computes the status for this position.
 func (p *Position) CurrentStatus() GameStatus {
 	color := p.colorOfSide()
-	moves := p.LegalMoves()
+	var ml MoveList
+	p.LegalMoves(&ml)
 	inCheck := p.IsInCheck(color)
-	return statusFor(color, moves, inCheck)
+	return statusFor(color, ml.n, inCheck)
 }

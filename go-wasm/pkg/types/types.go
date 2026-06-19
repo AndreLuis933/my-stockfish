@@ -77,6 +77,10 @@ func (p Piece) Color() Piece {
 	return p & ColorMask
 }
 
+func (p Piece) IsEnemy(other Piece) bool {
+	return other&ColorMask != ColorNone && p&ColorMask != other&ColorMask
+}
+
 func (p Piece) TypePiece() Piece {
 	return p & TypeMask
 }

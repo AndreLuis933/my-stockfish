@@ -12,6 +12,15 @@ func (p *Position) FindKing(color types.Piece) int {
 	return -1
 }
 
+// IsInCheck returns true if the king of `color` is currently attacked.
+func (p *Position) IsInCheck(color types.Piece) bool {
+	kingIdx := p.FindKing(color)
+	if kingIdx == -1 {
+		return false
+	}
+	return p.IsSquareAttacked(kingIdx, oppositeColor(color))
+}
+
 // IsSquareAttacked reports whether `idx` is attacked by any piece of `byColor`.
 // It scans outward from the target square (reverse scan): pawn diagonals,
 // knight L-jumps, king one-steps, then rook/bishop sliding rays.
@@ -107,13 +116,4 @@ func (p *Position) IsSquareAttacked(idx int, byColor types.Piece) bool {
 		}
 	}
 	return false
-}
-
-// IsInCheck returns true if the king of `color` is currently attacked.
-func (p *Position) IsInCheck(color types.Piece) bool {
-	kingIdx := p.FindKing(color)
-	if kingIdx == -1 {
-		return false
-	}
-	return p.IsSquareAttacked(kingIdx, oppositeColor(color))
 }

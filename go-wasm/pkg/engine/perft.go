@@ -15,13 +15,14 @@ func (p *Position) Perft(depth int) int {
 		return 1
 	}
 
-	moves := p.LegalMoves()
+	var ml MoveList
+	p.LegalMoves(&ml)
 	nodes := 0
 
-	for _, move := range moves {
-		p.Make(move)
+	for i := 0; i < ml.n; i++ {
+		p.Make(ml.moves[i])
 		nodes += p.Perft(depth - 1)
-		p.Unmake(move)
+		p.Unmake(ml.moves[i])
 	}
 
 	return nodes

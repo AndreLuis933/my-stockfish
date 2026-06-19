@@ -58,7 +58,7 @@ func TestLoadFenCastlingRights(t *testing.T) {
 
 func TestLegalMoveCountStartingPosition(t *testing.T) {
 	loadFEN(t, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
-	moves := Game.LegalMoves()
+	moves := Game.LegalMovesSlice()
 	if len(moves) != 20 {
 		t.Fatalf("expected 20 legal moves at start, got %d", len(moves))
 	}
@@ -66,7 +66,7 @@ func TestLegalMoveCountStartingPosition(t *testing.T) {
 
 func TestLegalMoveCountEmptyBoard(t *testing.T) {
 	loadFEN(t, "8/8/8/8/8/8/8/8 w - - 0 1")
-	moves := Game.LegalMoves()
+	moves := Game.LegalMovesSlice()
 	if len(moves) != 0 {
 		t.Fatalf("expected 0 legal moves on empty board, got %d", len(moves))
 	}
@@ -75,7 +75,7 @@ func TestLegalMoveCountEmptyBoard(t *testing.T) {
 func TestLegalMovesKingInCheckFromRook(t *testing.T) {
 	// White king e1, black rook e2, black king e8. White is in check from the rook.
 	loadFEN(t, "4k3/8/8/8/8/8/4r3/4K3 w - - 0 1")
-	moves := Game.LegalMoves()
+	moves := Game.LegalMovesSlice()
 
 	movesToTarget := map[int]bool{}
 	for _, m := range moves {
@@ -99,7 +99,7 @@ func TestLegalMovesPinnedPiece(t *testing.T) {
 	// White bishop e2 pinned by black rook on e8 against white king on e1.
 	// Bishop must not be allowed to move off the e-file.
 	loadFEN(t, "4r3/8/8/8/8/8/4B3/4K3 w - - 0 1")
-	moves := Game.LegalMoves()
+	moves := Game.LegalMovesSlice()
 
 	bishopIdx := 12 // e2
 	for _, m := range moves {
@@ -113,7 +113,7 @@ func TestLegalMovesKingCannotMoveIntoCheck(t *testing.T) {
 	// White queen on e7 attacks d8, e8 (king square), f8, and the e-file.
 	// Black king on e8 is in check and must move; d8 and f8 are attacked by the enemy queen.
 	loadFEN(t, "4k3/4Q3/8/8/8/8/8/4K3 b - - 0 1")
-	moves := Game.LegalMoves()
+	moves := Game.LegalMovesSlice()
 
 	kingIdx := 60 // e8
 
@@ -140,7 +140,7 @@ func TestLegalMovesEnPassantDiscoveredCheck(t *testing.T) {
 	// black king on a4, white rook on h4. If black plays exd3 e.p., both pawns leave rank 4,
 	// exposing the king to the rook → illegal.
 	loadFEN(t, "8/8/8/k2Pp2R/8/8/8/4K3 b - d6 0 1")
-	moves := Game.LegalMoves()
+	moves := Game.LegalMovesSlice()
 
 	for _, m := range moves {
 		if m.From == 36 && m.To == 29 { // e5 capturing d6 e.p. (indices depend on orientation)
