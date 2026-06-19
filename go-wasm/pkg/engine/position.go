@@ -29,6 +29,7 @@ type undoInfo struct {
 	enPassantCapture int         // pre-move EnPassantCapture
 	enPassantTarget  int         // pre-move EnPassantTarget
 	castlingRights   types.CastlingRights // pre-move castling rights
+	halfmoveClock    int         // pre-move halfmove clock
 }
 
 // Game is the single global Position used by the WASM bridge and the legacy

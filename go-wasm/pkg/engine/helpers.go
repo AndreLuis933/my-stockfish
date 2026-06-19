@@ -19,6 +19,7 @@ func inBounds(idx int) bool {
 	return idx >= 0 && idx < boardSize*boardSize
 }
 
+// oppositeColor returns the enemy color of the given piece color.
 func oppositeColor(color types.Piece) types.Piece {
 	if color&types.ColorMask == types.ColorBlack {
 		return types.ColorWhite
@@ -34,17 +35,7 @@ func (p *Position) colorOfSide() types.Piece {
 	return types.ColorBlack
 }
 
-// TODO: remove once move generators are migrated (duplicate of oppositeColor).
-func pieceColor(color types.Piece) types.Piece {
-	if color&types.ColorMask == types.ColorBlack {
-		return types.ColorBlack
-	}
-	return types.ColorWhite
-}
-
-// Legacy helpers (to be deleted after full migration) --------------------
-
-func PiecePtr(p types.Piece) *types.Piece { return &p }
+// Legacy free functions (delegate to Game) — used by the WASM bridge --------
 
 // KingCheck returns the square index of the side-to-move king if it is in
 // check, or -1 otherwise. Exposed to the frontend as `isCheckJS`.
@@ -56,9 +47,8 @@ func KingCheck() int {
 	return -1
 }
 
-// Perft counts the number of leaf nodes at the given depth from the current
-// Game position. Used for move-generation validation and as a performance
-// baseline. Will move to a method on *Position and use Make/Unmake later.
+// Perft counts leaf nodes at the given depth from the Game position.
+// Delegates to the Position method; kept for external callers.
 func Perft(depth int) int {
 	return Game.Perft(depth)
 }

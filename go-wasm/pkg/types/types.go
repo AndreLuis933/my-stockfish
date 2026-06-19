@@ -59,11 +59,11 @@ const (
 type Move struct {
 	From      int    `json:"from"`
 	To        int    `json:"to"`
-	Promotion *Piece `json:"promotion,omitempty"`
+	Promotion Piece  `json:"promotion,omitempty"`
 	// Internal-only fields — NOT serialized to JSON (the frontend contract
 	// is {from, to, promotion?}). Used by Make/Unmake and AI move ordering.
 	Flag     MoveFlag `json:"-"`
-	Captured Piece     `json:"-"`
+	Captured Piece    `json:"-"`
 }
 
 func (p Piece) IsWhite() bool {

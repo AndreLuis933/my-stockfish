@@ -16,7 +16,7 @@ func MakeMove(from, to, promotion int) {
 	switch {
 	case piece&types.Pawn != 0 && promotion != 0:
 		move.Flag = types.FlagPromotion
-		move.Promotion = PiecePtr(types.Piece(promotion))
+		move.Promotion = types.Piece(promotion)
 	case piece&types.King != 0 && abs(to-from) == 2:
 		if to > from {
 			move.Flag = types.FlagCastleK
@@ -68,6 +68,7 @@ func (p *Position) Make(move types.Move) {
 		enPassantCapture: p.EnPassantCapture,
 		enPassantTarget:  p.EnPassantTarget,
 		castlingRights:   p.CastlingRights,
+		halfmoveClock:    p.HalfmoveClock,
 	})
 
 	// Clear en passant state every move; only DoublePush sets a new one.
@@ -108,8 +109,8 @@ func (p *Position) Make(move types.Move) {
 
 	case types.FlagPromotion:
 		p.Board[from] = 0
-		if move.Promotion != nil {
-			p.Board[to] = *move.Promotion
+		if move.Promotion != 0 {
+			p.Board[to] = move.Promotion
 		} else {
 			// Fallback: promotion move built without a Promotion piece
 			// (e.g. from the raw bridge path) — default to Queen.
@@ -142,6 +143,25 @@ func (p *Position) Make(move types.Move) {
 		case from == 63 || to == 63:
 			p.CastlingRights &^= types.CastleBlackK
 		}
+	}
+
+	// Halfmove clock — resets to 0 on pawn moves and captures, else increments.
+	// The 50-move rule: if this clock reaches 100 (50 full moves without a
+	// pawn move or capture), the game is a draw. The AI needs this to avoid
+	// grinding out dead positions.
+	isPawnMove := piece&types.Pawn == types.Pawn
+	isCapture := move.Captured != 0 || move.Flag == types.FlagEnPassant
+	if isPawnMove || isCapture {
+		p.HalfmoveClock = 0
+	} else {
+		p.HalfmoveClock++
+	}
+
+	// Fullmove number — increments after black moves (i.e., when black was
+	// the side that just moved, which means WhiteToMove was false before the
+	// flip below). We check the pre-flip state.
+	if !p.WhiteToMove {
+		p.FullmoveNumber++
 	}
 
 	p.WhiteToMove = !p.WhiteToMove
@@ -207,8 +227,15 @@ func (p *Position) Unmake(move types.Move) {
 		p.Board[to] = undo.captured
 	}
 
-	// Restore the pre-move en passant and castling state.
+	// Restore the pre-move en passant, castling, and clock state.
 	p.EnPassantCapture = undo.enPassantCapture
 	p.EnPassantTarget = undo.enPassantTarget
 	p.CastlingRights = undo.castlingRights
+	p.HalfmoveClock = undo.halfmoveClock
+
+	// Fullmove number — decrement if we're undoing a black move (i.e., after
+	// the side flip above, WhiteToMove is now false meaning black was to move).
+	if !p.WhiteToMove {
+		p.FullmoveNumber--
+	}
 }

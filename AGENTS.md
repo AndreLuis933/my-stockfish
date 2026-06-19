@@ -58,23 +58,26 @@ my-stockfish/
 │   │   ├── wasm/main.go           # WASM entry: registers goWasmEngine.{validMovesChess, initBoard, makeMove, isCheckJS, gameStatus}
 │   │   └── command/main.go        # CLI debug entry: loads FEN, runs Perft depths 1-5
 │   ├── pkg/
-│   │   ├── types/types.go         # Piece uint8 (type bits + color bits), CastlingRights uint8 (KQkq), Move struct, Piece methods
+│   │   ├── types/types.go         # Piece uint8 (type bits + color bits), CastlingRights uint8 (KQkq), Move struct (with Flag + Captured), MoveFlag enum, Piece methods
 │   │   └── engine/                # Chess logic (pure Go, no JS deps)
-│   │       ├── board.go           # Board [64]Piece, enPassant state, whiteToMove, castlingRights, oppositeColor, isWhite, KingCheck(), Perft()
-│   │       ├── anotation.go       # LoadFen(): parse FEN → Board, turn (w/b), castling rights (KQkq)
+│   │       ├── position.go        # Position struct (Board, WhiteToMove, CastlingRights, EnPassant*, HalfmoveClock, FullmoveNumber, undoStack) + Game global + reset()
+│   │       ├── helpers.go         # Pure helpers: abs, inBounds, oppositeColor, colorOfSide(); legacy free fns KingCheck()/Perft() delegating to Game
+│   │       ├── fen.go             # LoadFen(): parses all 6 FEN fields (pieces, turn, castling, en passant target, halfmove clock, fullmove number) + squareToIndex() + StartingFEN constant
 │   │       ├── print.go           # PrintBoard(): ASCII debug print
-│   │       ├── moves.go           # getPseudoLegalMoves(): iterate board, dispatch per piece type, filtered by turn
-│   │       ├── move_pawn.go       # Pawn moves: forward, double, captures, en passant, promotion (4 moves)
+│   │       ├── moves.go           # Position.PseudoLegalMoves(): iterate board, dispatch per piece type, filtered by turn
+│   │       ├── move_pawn.go       # Pawn moves: forward, double (FlagDoublePush), captures, en passant (FlagEnPassant), promotion (FlagPromotion, 4 moves)
 │   │       ├── move_knight.go     # Knight L-jumps with row/col diff validation
 │   │       ├── move_bishop.go     # Bishop diagonal slides
 │   │       ├── move_rook.go       # Rook orthogonal slides
-│   │       ├── move_king.go       # King one-step + castling (kingside/queenside, with attack-path checks)
-│   │       ├── move_apply.go      # MakeMove(from, to, promotion): applies move, sets en passant, castling rook move, clears rights, flips whiteToMove
-│   │       ├── attacks.go         # FindKing, IsSquareAttacked (reverse-scan), IsInCheck
-│   │       ├── legal.go           # GetValidMoves(): pseudo-legal → snapshot/make/restore filter (state stack for recursion), drops moves leaving own king in check
-│   │       ├── status.go          # GameStatus enum + CurrentStatus(): playing / white-wins / black-wins / draw (checkmate & stalemate)
+│   │       ├── move_king.go       # King one-step + castling (FlagCastleK/FlagCastleQ, with attack-path checks)
+│   │       ├── make.go            # Position.Make(move) + Position.Unmake(move): flagged make/unmake with undoStack (O(1) reversible), handles en passant/castling/promotion/clocks; legacy MakeMove(from,to,promo) bridge fn
+│   │       ├── attacks.go         # Position.FindKing, Position.IsSquareAttacked (reverse-scan), Position.IsInCheck
+│   │       ├── legal.go           # Position.LegalMoves(): pseudo-legal → Make/Unmake filter, drops moves leaving own king in check
+│   │       ├── status.go          # GameStatus enum + Position.CurrentStatus(): playing / white-wins / black-wins / draw (checkmate & stalemate)
+│   │       ├── perft.go           # Position.Perft(depth): recursive node count using Make/Unmake
 │   │       ├── legal_test.go      # Tests: FEN loading, castling rights, legal move counts, pins, en-passant discovered check, king-in-check
-│   │       ├── status_test.go     # Tests: CurrentStatus (playing, fool's mate, stalemate, back-rank mate), GameStatus.String/IsGameOver
+│   │       ├── fen_test.go        # Tests: en passant target parsing, halfmove clock, fullmove number, squareToIndex, Make/Unmake clock management
+│   │       ├── status_test.go     # Tests: CurrentStatus (playing, fool's mate, stalemate, back-rank mate), GameStatus.String/IsGameOver, statusFor
 │   │       └── perft_test.go      # Tests: Perft on all 6 chessprogramming.org standard positions (initial, Kiwipete, Pos3-6)
 │   ├── tools/main.go              # Type generator: Go AST + type-checker → wasm-contract.ts
 │   └── bin/gen-types.exe          # Compiled type generator binary
@@ -97,12 +100,15 @@ my-stockfish/
 
 **Xadrez (Chess)**
 - Game runs in the browser via Go WASM: human-vs-human (human-vs-ai mode exists but AI is not yet implemented for chess)
-- Go engine handles: board representation, FEN loading (with turn + castling rights), move generation for all piece types, captures, en passant, pawn promotion, **castling**
-- **Castling**: implemented in Go — kingside & queenside for both colors; all 6 FIDE conditions checked (rights, empty path, king not in check, king path not attacked, king destination not attacked); rook moves with the king on `MakeMove`; castling rights cleared on king/rook moves and rook captures
-- **Legal move filtering**: pseudo-legal moves are filtered by snapshot/make/restore (state stack for recursion) — pins, en-passant discovered checks, and king-moves-into-check are all handled automatically
-- **Check detection**: `IsSquareAttacked` (reverse-scan from a square) + `IsInCheck` (king square attacked) + `KingCheck()` exposed to the frontend as `isCheckJS` → returns the checked king's square index or -1
-- **Game status**: `CurrentStatus()` returns `playing | white-wins | black-wins | draw` (checkmate = no legal moves + in check, stalemate = no legal moves + not in check), exposed as `gameStatus`
-- **Perft validation**: `Perft()` runs recursive move enumeration; validated against all 6 standard positions from chessprogramming.org/Perft_Results (initial position through depth 5 = 4,865,609 nodes; Kiwipete; Positions 3-6)
+- Go engine handles: board representation, FEN loading (all 6 fields: pieces, turn, castling, en passant target, halfmove clock, fullmove number), move generation for all piece types, captures, en passant, pawn promotion, **castling**
+- **Position struct**: all game state is encapsulated in `Position` (Board, WhiteToMove, CastlingRights, EnPassantTarget/Capture, HalfmoveClock, FullmoveNumber, undoStack); a global `Game *Position` is used by the WASM bridge, the AI will create its own instances for parallel search
+- **Flagged moves**: `Move` carries a `MoveFlag` (Normal | DoublePush | EnPassant | CastleK | CastleQ | Promotion) and a `Captured` piece — internal-only fields (`json:"-"`) so the frontend contract stays `{from, to, promotion?}`
+- **Make/Unmake**: `Position.Make(move)` applies a move incrementally and pushes undo info onto a stack; `Position.Unmake(move)` reverses it in O(1) — no full board copy, the performance foundation for AI search
+- **Castling**: implemented in Go — kingside & queenside for both colors; all 6 FIDE conditions checked (rights, empty path, king not in check, king path not attacked, king destination not attacked); rook moves with the king on `Make`; castling rights cleared on king/rook moves and rook captures
+- **Legal move filtering**: pseudo-legal moves are filtered by Make/Unmake — pins, en-passant discovered checks, and king-moves-into-check are all handled automatically
+- **Check detection**: `Position.IsSquareAttacked` (reverse-scan from a square) + `Position.IsInCheck` (king square attacked) + `KingCheck()` exposed to the frontend as `isCheckJS` → returns the checked king's square index or -1
+- **Game status**: `Position.CurrentStatus()` returns `playing | white-wins | black-wins | draw` (checkmate = no legal moves + in check, stalemate = no legal moves + not in check), exposed as `gameStatus`
+- **Perft validation**: `Position.Perft()` runs recursive move enumeration using Make/Unmake; validated against all 6 standard positions from chessprogramming.org/Perft_Results (initial position through depth 5 = 4,865,609 nodes; Kiwipete; Positions 3-6)
 - Pawn promotion: when a pawn reaches the last rank, a `PromotionPicker` modal lets the user choose Q/N/R/B; the chosen piece byte is sent to `engine.makeMove(from, to, promotionByte)`
 - Move validation: clicking a piece queries `engine.validMovesChess()` (JSON of `{from, to, promotion?}[]`), highlights legal targets
 - **Check highlight**: when `isCheckJS` returns a square, the king's square glows red (pulsing animation) and a "Xeque!" badge appears in the turn banner
@@ -136,7 +142,7 @@ React component
   → useWasm() hook  →  WasmWorkerEngine.makeMove(from, to, promotion)
     → loader.ts: postMessage({ id: 0, fn: "makeMove", args: [from, to, promotion] })
       → worker.js: self.goWasmEngine.makeMove(from, to, promotion)
-        → cmd/wasm/main.go: makeMoveJS → engine.MakeMovement(from, to, promotion)
+        → cmd/wasm/main.go: makeMoveJS → engine.MakeMove(from, to, promotion)
       → worker.js: postMessage({ id: 0, result: [board bytes...] })
     → loader.ts: Promise resolves with number[]
 ```
@@ -145,9 +151,9 @@ React component
 
 | JS name | Go bridge | Pure function | Args | Return |
 |---|---|---|---|---|
-| `validMovesChess` | `getValidMovesJS` | `engine.GetValidMoves()` | — | JSON string of `Move[]` |
-| `initBoard` | `initBoardJs` | `engine.LoadFen("rnbqkbnr/...")` | — | `number[]` (64 board bytes) |
-| `makeMove` | `makeMoveJS` | `engine.MakeMovement(from, to, promotion)` | `number, number, number?` | `number[]` (64 board bytes) |
+| `validMovesChess` | `getValidMovesJS` | `engine.Game.LegalMoves()` | — | JSON string of `Move[]` |
+| `initBoard` | `initBoardJs` | `engine.LoadFen(engine.StartingFEN)` | — | `number[]` (64 board bytes) |
+| `makeMove` | `makeMoveJS` | `engine.MakeMove(from, to, promotion)` | `number, number, number?` | `number[]` (64 board bytes) |
 | `isCheckJS` | `isCheckJS` | `engine.KingCheck()` | — | `number` (checked king's square index, or -1) |
 | `gameStatus` | `gameStatusJS` | `engine.CurrentStatus().String()` | — | `string` (`"playing"` \| `"white-wins"` \| `"black-wins"` \| `"draw"`) |
 
@@ -160,7 +166,7 @@ bits 6-7: color
   00=empty, 01=white (0b01000000), 10=black (0b10000000)
 ```
 
-`Move.Promotion` is a `*Piece` (color bits | type bits) — only set for pawn promotion moves. The Go engine emits 4 separate moves per promotable pawn push (Q, N, B, R), each with a different `Promotion` byte. The frontend collects these into a `PendingPromotion` and shows the picker.
+`Move.Promotion` is a `Piece` (color bits | type bits, value type not pointer) — `omitempty` in JSON means it's omitted when 0 (no promotion). The Go engine emits 4 separate moves per promotable pawn push (Q, N, B, R), each with a different `Promotion` byte. The frontend collects these into a `PendingPromotion` and shows the picker. `Move.Flag` and `Move.Captured` are internal-only (`json:"-"`).
 
 ### Castling rights encoding
 

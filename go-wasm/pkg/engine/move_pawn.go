@@ -12,7 +12,7 @@ func (p *Position) MovePawn(piece types.Piece, i int, moves []types.Move) []type
 	col := i % boardSize
 	isWhite := piece&types.ColorWhite == types.ColorWhite
 	enemyColor := oppositeColor(piece)
-	myColor := pieceColor(piece)
+	myColor := piece.Color()
 
 	dir, startRow, promotionRow := -boardSize, 6, 1
 	if isWhite {
@@ -78,7 +78,7 @@ func promotionPawn(from, to int, color, captured types.Piece, moves []types.Move
 		moves = append(moves, types.Move{
 			From:      from,
 			To:        to,
-			Promotion: PiecePtr(promotion | color),
+			Promotion: promotion | color,
 			Flag:      types.FlagPromotion,
 			Captured:  captured,
 		})
