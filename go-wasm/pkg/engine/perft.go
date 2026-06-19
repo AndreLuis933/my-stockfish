@@ -17,7 +17,7 @@ func (p *Position) Perft(depth int) int {
 
 	for _, move := range moves {
 		saved := p.snapshot()
-		p.MakeMove(move.From, move.To, promotionInt(move.Promotion))
+		p.Make(move)
 		nodes += p.Perft(depth - 1)
 		p.restore(saved)
 	}

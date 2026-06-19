@@ -23,14 +23,14 @@ func (p *Position) MoveKnight(piece types.Piece, i int, moves []types.Move) []ty
 		}
 
 		if p.Board[target] == 0 {
-			moves = append(moves, types.Move{From: i, To: target})
+			moves = append(moves, types.Move{From: i, To: target, Flag: types.FlagNormal})
 			continue
 		}
 
 		isEnemy := (isWhite && p.Board[target]&types.ColorBlack == types.ColorBlack) ||
 			(!isWhite && p.Board[target]&types.ColorWhite == types.ColorWhite)
 		if isEnemy {
-			moves = append(moves, types.Move{From: i, To: target})
+			moves = append(moves, types.Move{From: i, To: target, Flag: types.FlagNormal, Captured: p.Board[target]})
 		}
 	}
 

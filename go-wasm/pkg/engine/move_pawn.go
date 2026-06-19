@@ -29,7 +29,7 @@ func (p *Position) MovePawn(piece types.Piece, i int, moves []types.Move) []type
 
 		if row == startRow {
 			if double := i + 2*dir; inBounds(double) && p.Board[double] == 0 {
-				moves = append(moves, types.Move{From: i, To: double})
+				moves = append(moves, types.Move{From: i, To: double, Flag: types.FlagDoublePush})
 			}
 		}
 	}
@@ -45,8 +45,10 @@ func (p *Position) MovePawn(piece types.Piece, i int, moves []types.Move) []type
 		if t := i + dir + 1; inBounds(t) && (p.Board[t]&enemyColor == enemyColor || (canCaptureEnPassant && t == p.EnPassantTarget)) {
 			if row == promotionRow {
 				moves = promotionPawn(i, t, myColor, moves)
+			} else if canCaptureEnPassant && t == p.EnPassantTarget {
+				moves = append(moves, types.Move{From: i, To: t, Flag: types.FlagEnPassant, Captured: p.Board[p.EnPassantCapture]})
 			} else {
-				moves = append(moves, types.Move{From: i, To: t})
+				moves = append(moves, types.Move{From: i, To: t, Flag: types.FlagNormal, Captured: p.Board[t]})
 			}
 		}
 	}
@@ -56,8 +58,10 @@ func (p *Position) MovePawn(piece types.Piece, i int, moves []types.Move) []type
 		if t := i + dir - 1; inBounds(t) && (p.Board[t]&enemyColor == enemyColor || (canCaptureEnPassant && t == p.EnPassantTarget)) {
 			if row == promotionRow {
 				moves = promotionPawn(i, t, myColor, moves)
+			} else if canCaptureEnPassant && t == p.EnPassantTarget {
+				moves = append(moves, types.Move{From: i, To: t, Flag: types.FlagEnPassant, Captured: p.Board[p.EnPassantCapture]})
 			} else {
-				moves = append(moves, types.Move{From: i, To: t})
+				moves = append(moves, types.Move{From: i, To: t, Flag: types.FlagNormal, Captured: p.Board[t]})
 			}
 		}
 	}
@@ -69,7 +73,12 @@ func (p *Position) MovePawn(piece types.Piece, i int, moves []types.Move) []type
 // reaching the last rank. It is a free function (no Position state needed).
 func promotionPawn(from, to int, color types.Piece, moves []types.Move) []types.Move {
 	for _, promotion := range []types.Piece{types.Queen, types.Knight, types.Bishop, types.Rook} {
-		moves = append(moves, types.Move{From: from, To: to, Promotion: PiecePtr(promotion | color)})
+		moves = append(moves, types.Move{
+			From:      from,
+			To:        to,
+			Promotion: PiecePtr(promotion | color),
+			Flag:      types.FlagPromotion,
+		})
 	}
 	return moves
 }

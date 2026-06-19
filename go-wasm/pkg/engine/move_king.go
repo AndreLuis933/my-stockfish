@@ -33,13 +33,13 @@ func (p *Position) MoveKing(piece types.Piece, i int, moves []types.Move) []type
 		}
 
 		if p.Board[target] == 0 {
-			moves = append(moves, types.Move{From: i, To: target})
+			moves = append(moves, types.Move{From: i, To: target, Flag: types.FlagNormal})
 			continue
 		}
 		isEnemy := (isWhite && p.Board[target]&types.ColorBlack == types.ColorBlack) ||
 			(!isWhite && p.Board[target]&types.ColorWhite == types.ColorWhite)
 		if isEnemy {
-			moves = append(moves, types.Move{From: i, To: target})
+			moves = append(moves, types.Move{From: i, To: target, Flag: types.FlagNormal, Captured: p.Board[target]})
 		}
 	}
 
@@ -61,7 +61,7 @@ func (p *Position) MoveKing(piece types.Piece, i int, moves []types.Move) []type
 		!p.IsSquareAttacked(kingPos, enemy) &&
 		!p.IsSquareAttacked(kingPos+1, enemy) &&
 		!p.IsSquareAttacked(kingPos+2, enemy) {
-		moves = append(moves, types.Move{From: kingPos, To: kingPos + 2})
+		moves = append(moves, types.Move{From: kingPos, To: kingPos + 2, Flag: types.FlagCastleK})
 	}
 
 	if p.CastlingRights&rightsQ != 0 &&
@@ -73,7 +73,7 @@ func (p *Position) MoveKing(piece types.Piece, i int, moves []types.Move) []type
 		!p.IsSquareAttacked(kingPos, enemy) &&
 		!p.IsSquareAttacked(kingPos-1, enemy) &&
 		!p.IsSquareAttacked(kingPos-2, enemy) {
-		moves = append(moves, types.Move{From: kingPos, To: kingPos - 2})
+		moves = append(moves, types.Move{From: kingPos, To: kingPos - 2, Flag: types.FlagCastleQ})
 	}
 
 	return moves

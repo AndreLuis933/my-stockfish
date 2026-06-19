@@ -35,13 +35,6 @@ func (p *Position) restore(s positionSnapshot) {
 	p.CastlingRights = s.castlingRights
 }
 
-func promotionInt(p *types.Piece) int {
-	if p == nil {
-		return 0
-	}
-	return int(*p)
-}
-
 // LegalMoves returns all pseudo-legal moves that do not leave the own king
 // in check. It works by: generate pseudo-legal → for each, snapshot / make /
 // test / restore. This handles pins, en-passant discovered checks, and
@@ -52,7 +45,7 @@ func (p *Position) LegalMoves() []types.Move {
 	legal := make([]types.Move, 0, len(pseudo))
 	for _, m := range pseudo {
 		saved := p.snapshot()
-		p.MakeMove(m.From, m.To, promotionInt(m.Promotion))
+		p.Make(m)
 		if !p.IsInCheck(moverColor) {
 			legal = append(legal, m)
 		}

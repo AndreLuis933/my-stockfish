@@ -42,10 +42,28 @@ const Sliders Piece = Bishop | Rook | Queen
 
 type Board [64]Piece
 
+// MoveFlag encodes the kind of move so MakeMove/Unmake can apply and revert
+// it efficiently without re-inspecting the board. This is the standard
+// representation used by chess engines (the "flagged move" pattern).
+type MoveFlag uint8
+
+const (
+	FlagNormal    MoveFlag = iota // quiet move or capture, nothing special
+	FlagDoublePush                // pawn moved two squares (sets en passant target)
+	FlagEnPassant                 // pawn captures another pawn en passant
+	FlagCastleK                   // king castles kingside (rook moves too)
+	FlagCastleQ                   // king castles queenside (rook moves too)
+	FlagPromotion                 // pawn reaches last rank and promotes
+)
+
 type Move struct {
 	From      int    `json:"from"`
 	To        int    `json:"to"`
 	Promotion *Piece `json:"promotion,omitempty"`
+	// Internal-only fields — NOT serialized to JSON (the frontend contract
+	// is {from, to, promotion?}). Used by Make/Unmake and AI move ordering.
+	Flag     MoveFlag `json:"-"`
+	Captured Piece     `json:"-"`
 }
 
 func (p Piece) IsWhite() bool {
