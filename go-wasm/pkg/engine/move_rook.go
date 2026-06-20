@@ -2,7 +2,7 @@ package engine
 
 import "webassemble/pkg/types"
 
-var rookDirections = []int{-boardSize, boardSize, -1, 1}
+var rookDirections = [4]int{-boardSize, boardSize, -1, 1}
 
 // MoveRook slides along ranks and files until it hits a piece or the edge.
 func (p *Position) MoveRook(piece types.Piece, i int, ml *MoveList) {

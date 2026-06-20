@@ -1,0 +1,254 @@
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 280px;
+  min-height: 0;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  padding: 14px;
+}
+
+/* ── Clocks ──────────────────────────────────────────── */
+
+.clocksRow {
+  display: flex;
+  gap: 8px;
+}
+
+.clockCard {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: border-color 200ms ease, background 200ms ease;
+}
+
+.clockActive {
+  border-color: rgba(108, 92, 231, 0.7);
+  background: rgba(108, 92, 231, 0.15);
+}
+
+.clockFlagged {
+  border-color: #e63946;
+  background: rgba(230, 57, 70, 0.12);
+}
+
+.clockDotWhite {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #f5f0e8, #c9b99a);
+  flex-shrink: 0;
+}
+
+.clockDotBlack {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #5a3d28, #180e06);
+  flex-shrink: 0;
+}
+
+.clockTime {
+  font-size: 18px;
+  font-weight: 600;
+  color: #e0d8f0;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+.clockLow {
+  color: #e63946;
+  animation: clockPulse 1s ease-in-out infinite;
+}
+
+@keyframes clockPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+/* ── History header + nav ────────────────────────────── */
+
+.historyHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.historyTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(224, 216, 240, 0.6);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.navButtons {
+  display: flex;
+  gap: 4px;
+}
+
+.navButton {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(224, 216, 240, 0.7);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.navButton:hover {
+  background: rgba(108, 92, 231, 0.2);
+  color: #e0d8f0;
+}
+
+/* ── Move list ───────────────────────────────────────── */
+
+.moveList {
+  flex: 1;
+  min-height: 120px;
+  max-height: 420px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-right: 4px;
+}
+
+.moveList::-webkit-scrollbar {
+  width: 6px;
+}
+
+.moveList::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+}
+
+.moveRow {
+  display: grid;
+  grid-template-columns: 28px 1fr 1fr;
+  gap: 4px;
+  align-items: center;
+}
+
+.moveNum {
+  font-size: 12px;
+  color: rgba(224, 216, 240, 0.35);
+  text-align: right;
+  padding-right: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.moveCell {
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: #e0d8f0;
+  font-size: 13px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms ease;
+  font-family: "Courier New", monospace;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+}
+
+.evalTag {
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(108, 92, 231, 0.8);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.moveCell:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.moveCellActive {
+  background: rgba(108, 92, 231, 0.3);
+  color: #fff;
+}
+
+.startCell {
+  margin-bottom: 4px;
+  font-style: italic;
+  color: rgba(224, 216, 240, 0.5);
+}
+
+.emptyHint {
+  font-size: 12px;
+  color: rgba(224, 216, 240, 0.3);
+  text-align: center;
+  padding: 20px 0;
+  font-style: italic;
+}
+
+/* ── Result box ──────────────────────────────────────── */
+
+.resultBox {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 16px;
+  border-radius: 10px;
+  background: rgba(108, 92, 231, 0.12);
+  border: 1px solid rgba(108, 92, 231, 0.3);
+}
+
+.resultText {
+  font-size: 15px;
+  font-weight: 700;
+  color: #e0d8f0;
+  text-align: center;
+}
+
+.restartButton {
+  padding: 8px 24px;
+  border-radius: 999px;
+  border: none;
+  background: #6c5ce7;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 150ms ease, transform 100ms ease;
+}
+
+.restartButton:hover {
+  background: #7d6ff0;
+}
+
+.restartButton:active {
+  transform: scale(0.96);
+}
+
+/* ── Responsive ──────────────────────────────────────── */
+
+@media (max-width: 920px) {
+  .sidebar {
+    width: 100%;
+  }
+
+  .moveList {
+    max-height: 200px;
+  }
+}

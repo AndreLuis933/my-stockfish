@@ -2,7 +2,7 @@ package engine
 
 import "webassemble/pkg/types"
 
-var bishopDirections = []int{-boardSize - 1, -boardSize + 1, boardSize - 1, boardSize + 1}
+var bishopDirections = [4]int{-boardSize - 1, -boardSize + 1, boardSize - 1, boardSize + 1}
 
 // MoveBishop slides along the 4 diagonals until it hits a piece or the edge.
 func (p *Position) MoveBishop(piece types.Piece, i int, ml *MoveList) {

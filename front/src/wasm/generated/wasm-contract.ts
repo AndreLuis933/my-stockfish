@@ -7,8 +7,19 @@ export interface WasmContract {
   gameStatus: { args: []; return: string };
   aiMove: { args: [number]; return: string };
   aiMoveDepth: { args: [number]; return: string };
+  aiAnalysis: { args: [number]; return: string };
 }
 ;
+
+export interface AiAnalysisResult {
+  from: number;
+  to: number;
+  promotion?: number;
+  score: number;
+  depth: number;
+  nodes: number;
+  timeMs: number;
+}
 export type WasmFunctionName = keyof WasmContract;
 
 export type WasmEngine = {

@@ -90,7 +90,7 @@ go run ./cmd/command
 
 ### Xadrez (Chess) — fully playable
 
-- Game runs in the browser via Go WASM: **human-vs-human** and **human-vs-AI** (AI plays either color)
+- Game runs in the browser via Go WASM: **human-vs-human**, **human-vs-AI** (AI plays either color), and **AI-vs-AI** (both sides played by the engine)
 - **Chess AI** (`pkg/ai`): negamax + alpha-beta + iterative deepening in Go; material + piece-square table evaluation; captures-first move ordering; time-limited or fixed-depth search
 - Go engine handles: board representation, FEN loading (all 6 fields), move generation for all piece types, captures, en passant, pawn promotion, **castling**
 - **Castling**: data-driven via `castleSides [4]castleSide` table; all 6 FIDE conditions checked; rook moves with the king; castling rights cleared on king/rook moves and rook captures
@@ -102,6 +102,14 @@ go run ./cmd/command
 - Pawn promotion: picker modal (Q/N/R/B) wired end-to-end
 - **AI setup panel**: user chooses their color (board auto-flips), search mode (difficulty / custom time / custom depth), and difficulty level (Fácil/Médio/Difícil)
 - **"IA pensando..." indicator**: badge in turn banner while AI searches
+- **Move history sidebar**: SAN-like notation (e4, Nf3, exd5, O-O, e8=Q+); click any move to jump to that position; navigation buttons (|<, <, >, >|); per-move eval tags
+- **Chess clock**: dual countdown with configurable initial time (1/3/5/10/15 min or none) and increment (0/2/3/5/10s); flag fall → loss
+- **No auto-restart**: result overlay stays until the user clicks "Jogar novamente" (no cancel button)
+- **Move animations**: pieces slide to destination; captured pieces fade-out; castling animates king + rook simultaneously
+- **Coordinate labels**: file letters (a-h) and rank numbers (1-8) on board edges
+- **Keyboard navigation**: ArrowLeft/Right navigate history, Home/End jump to start/end (works after game over too)
+- **Position analysis**: "Analisar" button shows AI evaluation (pawns), best move with arrow on board, and search depth
+- **Auto-analyze**: "Analisar auto" toggle runs analysis after each move and stores eval tags in the move history
 - Board flip, turn banner, result overlay
 
 ### What is missing

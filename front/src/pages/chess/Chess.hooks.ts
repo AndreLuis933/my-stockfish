@@ -1,9 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChessBoard, ChessColor } from "@/types/chess";
 import { emptyBoard } from "@/utils/chessEngine";
+import { toSan, type MoveData } from "@/utils/chessNotation";
+import type { ClockConfig, UseChessClock } from "@/hooks/useChessClock";
+import { useChessClock } from "@/hooks/useChessClock";
+import type { WasmEngine, AiAnalysisResult } from "@/wasm/generated/wasm-contract";
 import { useWasm } from "@/wasm/useWasm";
 
-export type ChessGameMode = "human-vs-ai" | "human-vs-human";
+export type ChessGameMode = "human-vs-ai" | "human-vs-human" | "ai-vs-ai";
 export type ChessResult = "white-wins" | "black-wins" | "draw" | null;
 export type ChessDifficulty = "easy" | "medium" | "hard";
 export type ChessSearchMode = "difficulty" | "time" | "depth";
@@ -12,6 +16,19 @@ export interface PendingPromotion {
   from: number;
   to: number;
   options: number[];
+}
+
+export interface HistoryEntry {
+  san: string;
+  color: ChessColor;
+  from: number;
+  to: number;
+  promotion?: number;
+  boardBefore: ChessBoard;
+  boardAfter: ChessBoard;
+  checkSquareAfter: number | null;
+  isCheckmate: boolean;
+  analysis?: AiAnalysisResult | null;
 }
 
 interface Move {
@@ -30,6 +47,9 @@ interface ChessState {
   candidateMoves: Move[];
   checkSquare: number | null;
   aiThinking: boolean;
+  lastMove: { from: number; to: number } | null;
+  boardBefore: ChessBoard | null;
+  animateId: number;
 }
 
 const initialState = (): ChessState => ({
@@ -42,6 +62,9 @@ const initialState = (): ChessState => ({
   candidateMoves: [],
   checkSquare: null,
   aiThinking: false,
+  lastMove: null,
+  boardBefore: null,
+  animateId: 0,
 });
 
 const pieceColor = (byte: number): ChessColor | null => {
@@ -64,6 +87,23 @@ const DIFFICULTY_MS: Record<ChessDifficulty, number> = {
 
 const AI_DELAY_MS = 400;
 
+export interface UseChessReturn {
+  state: ChessState;
+  history: HistoryEntry[];
+  currentPly: number;
+  isAtLatest: boolean;
+  handleSquareClick: (index: number) => Promise<void>;
+  restartGame: () => Promise<void>;
+  choosePromotion: (promotionByte: number) => Promise<void>;
+  cancelPromotion: () => void;
+  jumpToPly: (ply: number) => void;
+  clock: UseChessClock;
+  gameStarted: boolean;
+  analyze: (timeLimitMs: number) => Promise<AiAnalysisResult | null>;
+  autoAnalyze: boolean;
+  setAutoAnalyze: (on: boolean) => void;
+}
+
 export const useChess = (
   mode: ChessGameMode = "human-vs-human",
   aiColor: ChessColor = "black",
@@ -71,12 +111,22 @@ export const useChess = (
   searchMode: ChessSearchMode = "difficulty",
   customTimeMs: number = 1000,
   customDepth: number = 4,
-) => {
+  clockConfig: ClockConfig,
+): UseChessReturn => {
   const [state, setState] = useState<ChessState>(initialState);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [currentPly, setCurrentPly] = useState(0);
+  const [gameStarted, setGameStarted] = useState(false);
+
   const stateRef = useRef(state);
+  const historyRef = useRef(history);
 
   useEffect(() => {
     stateRef.current = state;
+  });
+
+  useEffect(() => {
+    historyRef.current = history;
   });
 
   const { engine } = useWasm();
@@ -84,11 +134,35 @@ export const useChess = (
   const { currentPlayer, result } = state;
 
   const isAiTurn = useCallback(
-    (color: ChessColor): boolean => mode === "human-vs-ai" && color === aiColor,
+    (color: ChessColor): boolean => {
+      if (mode === "ai-vs-ai") return true;
+      if (mode === "human-vs-ai") return color === aiColor;
+      return false;
+    },
     [mode, aiColor],
   );
 
-  // Load initial board
+  const isAtLatest = currentPly === history.length;
+
+  // ── Clock ──────────────────────────────────────────────
+  const clock = useChessClock(
+    clockConfig,
+    currentPlayer,
+    gameStarted && isAtLatest,
+    result !== null,
+  );
+
+  // Flag fall → game over
+  useEffect(() => {
+    if (clock.flagFallen && stateRef.current.result === null) {
+      const winner: ChessResult =
+        clock.flagFallen === "white" ? "black-wins" : "white-wins";
+      setState((p) => ({ ...p, result: winner }));
+      clock.stop();
+    }
+  }, [clock.flagFallen, clock]);
+
+  // ── Load initial board ─────────────────────────────────
   useEffect(() => {
     if (!engine) return;
 
@@ -101,7 +175,7 @@ export const useChess = (
       if (!cancelled) {
         setState((prev) => ({
           ...prev,
-          board: Array.from(rawBoard),
+          board: Array.from(rawBoard) as ChessBoard,
           checkSquare: checkSquare === -1 ? null : checkSquare,
         }));
       }
@@ -114,13 +188,78 @@ export const useChess = (
     };
   }, [engine]);
 
-  // AI turn effect — fires when it's the AI's turn and the engine is ready
+  // ── Helper: apply a move and record history ────────────
+  const onMoveCompleteRef = useRef(clock.onMoveComplete);
+  useEffect(() => {
+    onMoveCompleteRef.current = clock.onMoveComplete;
+  }, [clock.onMoveComplete]);
+
+  const applyMove = useCallback(
+    async (
+      currentEngine: WasmEngine,
+      from: number,
+      to: number,
+      promotion: number,
+      moverColor: ChessColor,
+    ): Promise<void> => {
+      const boardBefore = stateRef.current.board.slice();
+      const rawBoard = await currentEngine.makeMove(from, to, promotion);
+      const boardAfter = Array.from(rawBoard) as ChessBoard;
+      const checkSquare = await currentEngine.isCheckJS();
+      const status = await currentEngine.gameStatus();
+      const checkSq = checkSquare === -1 ? null : checkSquare;
+      const gameResult = toResult(status);
+      const isCheckmate = gameResult !== null && gameResult !== "draw";
+
+      const moveData: MoveData = { from, to, promotion: promotion || undefined };
+      const san = toSan(boardBefore, moveData, moverColor, checkSq, isCheckmate);
+
+      const nextPlayer: ChessColor = moverColor === "white" ? "black" : "white";
+
+      const entry: HistoryEntry = {
+        san,
+        color: moverColor,
+        from,
+        to,
+        promotion: promotion || undefined,
+        boardBefore,
+        boardAfter,
+        checkSquareAfter: checkSq,
+        isCheckmate,
+      };
+
+      setHistory((h) => [...h, entry]);
+      setCurrentPly((p) => p + 1);
+      setGameStarted(true);
+
+      setState((p) => ({
+        ...p,
+        board: boardAfter,
+        selectedSquare: null,
+        validMoveSquares: [],
+        candidateMoves: [],
+        currentPlayer: nextPlayer,
+        checkSquare: checkSq,
+        result: gameResult,
+        lastMove: { from, to },
+        boardBefore,
+        animateId: p.animateId + 1,
+      }));
+
+      onMoveCompleteRef.current(moverColor);
+    },
+    [],
+  );
+
+  // ── AI turn effect ─────────────────────────────────────
   useEffect(() => {
     if (!engine || result !== null) return;
-    if (mode !== "human-vs-ai") return;
-    if (currentPlayer !== aiColor) return;
+    if (mode === "human-vs-human") return;
+    if (mode === "human-vs-ai" && currentPlayer !== aiColor) return;
+    if (!isAtLatest) return;
 
     const currentEngine = engine;
+    const moverColor = currentPlayer;
     let cancelled = false;
 
     const timer = setTimeout(async () => {
@@ -138,28 +277,17 @@ export const useChess = (
 
       if (cancelled) return;
 
-      const rawBoard = await currentEngine.makeMove(
+      await applyMove(
+        currentEngine,
         aiMove.from,
         aiMove.to,
-        aiMove.promotion,
+        aiMove.promotion ?? 0,
+        moverColor,
       );
-      const checkSquare = await currentEngine.isCheckJS();
-      const status = await currentEngine.gameStatus();
-      const nextPlayer: ChessColor = aiColor === "white" ? "black" : "white";
 
-      if (cancelled) return;
-
-      setState((p) => ({
-        ...p,
-        board: Array.from(rawBoard),
-        selectedSquare: null,
-        validMoveSquares: [],
-        candidateMoves: [],
-        currentPlayer: nextPlayer,
-        checkSquare: checkSquare === -1 ? null : checkSquare,
-        result: toResult(status),
-        aiThinking: false,
-      }));
+      if (!cancelled) {
+        setState((p) => ({ ...p, aiThinking: false }));
+      }
     }, AI_DELAY_MS);
 
     return () => {
@@ -167,18 +295,30 @@ export const useChess = (
       clearTimeout(timer);
       setState((p) => ({ ...p, aiThinking: false }));
     };
-  }, [engine, mode, aiColor, difficulty, searchMode, customTimeMs, customDepth, currentPlayer, result]);
+  }, [
+    engine,
+    mode,
+    aiColor,
+    difficulty,
+    searchMode,
+    customTimeMs,
+    customDepth,
+    currentPlayer,
+    result,
+    isAtLatest,
+    applyMove,
+  ]);
 
+  // ── Square click handler ───────────────────────────────
   const handleSquareClick = useCallback(
     async (index: number) => {
-      if (!engine) {
-        console.log("sem engine");
-        return;
-      }
+      if (!engine) return;
 
       const prev = stateRef.current;
 
-      if (prev.result !== null || prev.aiThinking || isAiTurn(prev.currentPlayer)) return;
+      if (prev.result !== null || prev.aiThinking || isAiTurn(prev.currentPlayer))
+        return;
+      if (!isAtLatest) return;
 
       const clickedColor = pieceColor(prev.board[index]);
 
@@ -208,21 +348,7 @@ export const useChess = (
           return;
         }
 
-        const rawBoard = await engine.makeMove(from, to);
-        const checkSquare = await engine.isCheckJS();
-        const status = await engine.gameStatus();
-        const nextPlayer: ChessColor = prev.currentPlayer === "white" ? "black" : "white";
-
-        setState((p) => ({
-          ...p,
-          board: Array.from(rawBoard),
-          selectedSquare: null,
-          validMoveSquares: [],
-          candidateMoves: [],
-          currentPlayer: nextPlayer,
-          checkSquare: checkSquare === -1 ? null : checkSquare,
-          result: toResult(status),
-        }));
+        await applyMove(engine, from, to, 0, prev.currentPlayer);
         return;
       }
 
@@ -253,59 +379,165 @@ export const useChess = (
         return { ...p, validMoveSquares: targets, candidateMoves: ownMoves };
       });
     },
-    [engine, isAiTurn],
+    [engine, isAiTurn, isAtLatest, applyMove],
   );
 
+  // ── Restart ────────────────────────────────────────────
   const restartGame = useCallback(async () => {
     setState(initialState);
+    setHistory([]);
+    setCurrentPly(0);
+    setGameStarted(false);
+    clock.reset(clockConfig);
     if (engine) {
       const rawBoard = await engine.initBoard();
       const checkSquare = await engine.isCheckJS();
       setState((prev) => ({
         ...prev,
-        board: Array.from(rawBoard),
+        board: Array.from(rawBoard) as ChessBoard,
         checkSquare: checkSquare === -1 ? null : checkSquare,
       }));
     }
-  }, [engine]);
+  }, [engine, clock, clockConfig]);
 
+  // ── Promotion ──────────────────────────────────────────
   const choosePromotion = useCallback(
     async (promotionByte: number) => {
       const prev = stateRef.current;
       const pending = prev.pendingPromotion;
       if (!engine || !pending) return;
 
-      const rawBoard = await engine.makeMove(
+      await applyMove(
+        engine,
         pending.from,
         pending.to,
         promotionByte,
+        prev.currentPlayer,
       );
-      const checkSquare = await engine.isCheckJS();
-      const status = await engine.gameStatus();
-      const nextPlayer: ChessColor = prev.currentPlayer === "white" ? "black" : "white";
 
-      setState((p) => ({
-        ...p,
-        board: Array.from(rawBoard),
-        pendingPromotion: null,
-        candidateMoves: [],
-        currentPlayer: nextPlayer,
-        checkSquare: checkSquare === -1 ? null : checkSquare,
-        result: toResult(status),
-      }));
+      setState((p) => ({ ...p, pendingPromotion: null }));
     },
-    [engine],
+    [engine, applyMove],
   );
 
   const cancelPromotion = useCallback(() => {
     setState((p) => ({ ...p, pendingPromotion: null }));
   }, []);
 
-  return {
-    state,
-    handleSquareClick,
-    restartGame,
-    choosePromotion,
-    cancelPromotion,
-  };
+  // ── Analysis (evaluation + best move) ──────────────────
+  const analyze = useCallback(
+    async (timeLimitMs: number): Promise<AiAnalysisResult | null> => {
+      if (!engine) return null;
+      const json = await engine.aiAnalysis(timeLimitMs);
+      return JSON.parse(json) as AiAnalysisResult;
+    },
+    [engine],
+  );
+
+  // ── Auto-analyze: run analysis after each move ──────────
+  const [autoAnalyze, setAutoAnalyze] = useState(false);
+
+  useEffect(() => {
+    if (!engine || !autoAnalyze) return;
+    if (history.length === 0) return;
+    if (!isAtLatest) return;
+
+    const latestPly = history.length;
+    const latestEntry = history[latestPly - 1];
+    if (latestEntry.analysis) return;
+    if (latestEntry.isCheckmate) return;
+
+    let cancelled = false;
+
+    const timer = setTimeout(async () => {
+      const result = await analyze(500);
+      if (cancelled) return;
+      setHistory((h) => {
+        if (h.length < latestPly) return h;
+        const updated = h.slice();
+        updated[latestPly - 1] = { ...updated[latestPly - 1], analysis: result };
+        return updated;
+      });
+    }, 200);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [engine, autoAnalyze, history, isAtLatest, analyze]);
+
+  // ── Navigation (jump to ply) ───────────────────────────
+  const jumpToPly = useCallback(
+    (ply: number) => {
+      const clamped = Math.max(0, Math.min(history.length, ply));
+      setCurrentPly(clamped);
+
+      if (clamped === 0) {
+        const startBoard =
+          history.length > 0 ? history[0].boardBefore : stateRef.current.board;
+        setState((p) => ({
+          ...p,
+          board: startBoard,
+          selectedSquare: null,
+          validMoveSquares: [],
+          candidateMoves: [],
+          currentPlayer: "white" as ChessColor,
+          checkSquare: null,
+          lastMove: null,
+          boardBefore: null,
+        }));
+      } else {
+        const entry = history[clamped - 1];
+        const nextPlayer: ChessColor = entry.color === "white" ? "black" : "white";
+        setState((p) => ({
+          ...p,
+          board: entry.boardAfter,
+          selectedSquare: null,
+          validMoveSquares: [],
+          candidateMoves: [],
+          currentPlayer: nextPlayer,
+          checkSquare: entry.checkSquareAfter,
+          lastMove: { from: entry.from, to: entry.to },
+          boardBefore: entry.boardBefore,
+        }));
+      }
+    },
+    [history],
+  );
+
+  const memoizedReturn = useMemo(
+    () => ({
+      state,
+      history,
+      currentPly,
+      isAtLatest,
+      handleSquareClick,
+      restartGame,
+      choosePromotion,
+      cancelPromotion,
+      jumpToPly,
+      clock,
+      gameStarted,
+      analyze,
+      autoAnalyze,
+      setAutoAnalyze,
+    }),
+    [
+      state,
+      history,
+      currentPly,
+      isAtLatest,
+      handleSquareClick,
+      restartGame,
+      choosePromotion,
+      cancelPromotion,
+      jumpToPly,
+      clock,
+      gameStarted,
+      analyze,
+      autoAnalyze,
+    ],
+  );
+
+  return memoizedReturn;
 };

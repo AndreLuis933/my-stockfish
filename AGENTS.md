@@ -34,28 +34,31 @@ my-stockfish/
 │       │   ├── checkers/          # Route /checkers
 │       │   │   ├── Checkers.tsx
 │       │   │   └── Checkers.module.css
-│       │   └── chess/             # Route /chess
-│       │       ├── Chess.tsx              # Renders board, turn banner, promotion picker, "Xeque!" badge, result overlay, AI setup panel
-│       │       ├── Chess.hooks.ts         # useChess: state machine bridging React ↔ Go WASM, AI turn effect, difficulty/time/depth search modes
-│       │       └── Chess.module.css
+│   │   └── chess/             # Route /chess
+│   │       ├── Chess.tsx              # Renders board, turn banner, promotion picker, "Xeque!" badge, result overlay, AI setup panel, clock config, move history sidebar
+│   │       ├── Chess.hooks.ts         # useChess: state machine bridging React ↔ Go WASM, AI turn effect, difficulty/time/depth search modes, move history + navigation, clock integration
+│   │       └── Chess.module.css
 │       ├── components/
 │       │   ├── Board/             # Checkers board UI (Board.tsx + Board.module.css)
 │       │   ├── ChessBoard/        # Chess board UI (cburnett SVG pieces, selection + move hints + check glow)
+│       │   ├── MoveHistory/       # Move history sidebar (SAN notation, ply navigation, clocks display, result box)
 │       │   ├── PromotionPicker/   # Pawn promotion modal: Q/N/R/B picker using piece SVGs
 │       │   └── Nav/               # Top nav bar (links to /checkers and /chess)
 │       ├── hooks/useGame.ts       # Checkers state machine (uses TS AI)
+│       ├── hooks/useChessClock.ts # Chess clock hook: dual countdown, increments, flag-fall detection
 │       ├── utils/
 │       │   ├── gameEngine.ts      # Checkers: move gen, captures, flying kings, applyMove, turn state
 │       │   ├── aiEngine.ts        # Checkers AI: Minimax + Alpha-Beta + IDDFS, depth 8
 │       │   ├── chessEngine.ts     # Chess: emptyBoard(), pieceByte(), square helpers (board init is in Go)
-│       │   └── chessAssets.ts     # pieceImageUrl(piece) → cburnett SVG path (shared by ChessBoard + PromotionPicker)
+│       │   ├── chessAssets.ts     # pieceImageUrl(piece) → cburnett SVG path (shared by ChessBoard + PromotionPicker)
+│       │   └── chessNotation.ts   # Chess SAN-like notation generator (toSan, squareName, disambiguation, castling, promotion, check/mate suffixes)
 │       ├── types/
 │       │   ├── game.ts            # Checkers: Color, PieceType, Piece, Cell, Board, Move
 │       │   └── chess.ts           # Chess: ChessColor, ChessPieceType, ChessPiece, ChessBoard, getPiece, decodePieceByte
 │       └── assets/                # Static images (hero, react/vite svg)
 ├── go-wasm/                        # Go source compiled to WASM (module: webassemble, go 1.25)
 │   ├── cmd/
-│   │   ├── wasm/main.go           # WASM entry: registers goWasmEngine.{validMovesChess, initBoard, makeMove, isCheckJS, gameStatus, aiMove, aiMoveDepth}
+│   │   ├── wasm/main.go           # WASM entry: registers goWasmEngine.{validMovesChess, initBoard, makeMove, isCheckJS, gameStatus, aiMove, aiMoveDepth, aiAnalysis}
 │   │   └── command/main.go        # CLI debug entry: loads FEN, runs Perft depths 1-5
 │   ├── pkg/
 │   │   ├── types/types.go         # Piece uint8 (type bits + color bits), CastlingRights uint8 (KQkq), Move struct (with Flag + Captured), MoveFlag enum, Piece methods (IsWhite, IsBlack, IsEnemy, Color, TypePiece)
@@ -107,7 +110,7 @@ my-stockfish/
 - Board flip, piece counters, "IA pensando..." indicator, must-move highlighting
 
 **Xadrez (Chess)**
-- Game runs in the browser via Go WASM: human-vs-human and **human-vs-AI** (AI plays either color)
+- Game runs in the browser via Go WASM: human-vs-human, **human-vs-AI** (AI plays either color), and **AI-vs-AI** (both sides played by the engine)
 - **Chess AI** (`pkg/ai`): negamax + alpha-beta + iterative deepening in Go; material + piece-square table evaluation; captures-first move ordering; time-limited or fixed-depth search
 - Go engine handles: board representation, FEN loading (all 6 fields), move generation for all piece types, captures, en passant, pawn promotion, **castling**
 - **Position struct**: all game state is encapsulated in `Position` (Board, WhiteToMove, CastlingRights, EnPassantTarget/Capture, HalfmoveClock, FullmoveNumber, undoStack); a global `Game *Position` is used by the WASM bridge; the AI uses the same Position via `Make`/`Unmake`
@@ -126,6 +129,15 @@ my-stockfish/
 - **Result overlay**: "Brancas vencem!" / "Pretas vencem!" / "Empate!"
 - **AI setup panel**: user chooses their color (board auto-flips), search mode (difficulty / custom time / custom depth), and difficulty level (Fácil/Médio/Difícil)
 - **"IA pensando..." indicator**: badge in turn banner while AI searches
+- **Move history sidebar**: SAN-like notation (e4, Nf3, exd5, O-O, e8=Q+, O-O-O#) with move-pair rows; click any move to jump to that position; navigation buttons (|<, <, >, >|) for start/prev/next/end; auto-scrolls to current ply; per-move evaluation tags shown when analysis is available
+- **Position navigation**: viewing past positions does not trigger the AI or allow board interaction; making a new move is only possible from the latest position; a "revisitando" badge appears in the turn banner when viewing history
+- **Chess clock**: dual countdown (white/black) with configurable initial time (1/3/5/10/15 min or no clock) and increment (0/2/3/5/10s); clock starts on the first move; increment added after each move; flag fall → loss; clock config disabled during an active game
+- **No auto-restart**: on game over the result overlay shows and stays until the user clicks "Jogar novamente"; the overlay has no close/cancel button — the user is forced to restart
+- **Move animations**: pieces slide to their destination on move (300ms cubic-bezier); captured pieces fade-out with a scale pulse; castling animates both king and rook sliding simultaneously; last-move squares are highlighted
+- **Coordinate labels**: file letters (a-h) and rank numbers (1-8) shown on the board edges, color-matched to the square (light on dark, dark on light)
+- **Keyboard navigation**: ArrowLeft/ArrowRight navigate history (prev/next ply), Home/End jump to start/end; disabled when the promotion picker is open (works even after game over)
+- **Position analysis**: "Analisar" button runs the AI search on the current position and shows the evaluation score (in pawns), best move (with an arrow drawn on the board), and search depth; closeable panel
+- **Auto-analyze**: "Analisar auto" toggle automatically runs a 500ms analysis after each move and stores the evaluation in the move history; per-move eval tags appear next to each move in the sidebar
 - Board flip, turn banner, result overlay
 
 **AI architecture**
@@ -181,6 +193,7 @@ React component
 | `gameStatus` | `gameStatusJS` | `engine.CurrentStatus().String()` | — | `string` (`"playing"` \| `"white-wins"` \| `"black-wins"` \| `"draw"`) |
 | `aiMove` | `aiMoveJS` | `ai.Search(engine.Game, timeLimitMs)` | `number` (time limit ms) | JSON string `{from, to, promotion?}` |
 | `aiMoveDepth` | `aiMoveDepthJS` | `ai.SearchFixedDepth(engine.Game, depth)` | `number` (depth) | JSON string `{from, to, promotion?}` |
+| `aiAnalysis` | `aiAnalysisJS` | `ai.Search(engine.Game, timeLimitMs)` | `number` (time limit ms) | JSON string `{from, to, promotion?, score, depth, nodes, timeMs}` |
 
 ### Piece byte encoding (shared between Go and TS)
 

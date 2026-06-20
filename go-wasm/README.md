@@ -216,6 +216,7 @@ Browser (WASM) performance is typically 2-3x slower due to WASM overhead.
 | `gameStatus` | `gameStatusJS` | `engine.CurrentStatus().String()` | — | `string` (`"playing"` \| `"white-wins"` \| `"black-wins"` \| `"draw"`) |
 | `aiMove` | `aiMoveJS` | `ai.Search(engine.Game, timeLimitMs)` | `number` (time limit ms) | JSON string `{from, to, promotion?}` |
 | `aiMoveDepth` | `aiMoveDepthJS` | `ai.SearchFixedDepth(engine.Game, depth)` | `number` (depth) | JSON string `{from, to, promotion?}` |
+| `aiAnalysis` | `aiAnalysisJS` | `ai.Search(engine.Game, timeLimitMs)` | `number` (time limit ms) | JSON string `{from, to, promotion?, score, depth, nodes, timeMs}` |
 
 ---
 

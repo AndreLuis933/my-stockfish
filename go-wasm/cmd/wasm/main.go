@@ -81,6 +81,46 @@ func aiMoveDepthJS(_ js.Value, args []js.Value) interface{} {
 	return moveToJSON(result.Move)
 }
 
+// aiAnalysisJS runs a time-limited AI search and returns the best move plus
+// the evaluation score and search depth as JSON. Used by the "Analisar" button
+// to show the engine's assessment of the current position.
+func aiAnalysisJS(_ js.Value, args []js.Value) interface{} {
+	timeLimitMs := 1000
+	if len(args) > 0 && !args[0].IsUndefined() && args[0].Type() == js.TypeNumber {
+		timeLimitMs = args[0].Int()
+	}
+	result := ai.Search(engine.Game, timeLimitMs)
+	return analysisToJSON(result)
+}
+
+func analysisToJSON(result ai.SearchResult) interface{} {
+	data := struct {
+		From      int    `json:"from"`
+		To        int    `json:"to"`
+		Promotion *int   `json:"promotion,omitempty"`
+		Score     int    `json:"score"`
+		Depth     int    `json:"depth"`
+		Nodes     int    `json:"nodes"`
+		TimeMs    int64  `json:"timeMs"`
+	}{
+		From:   result.Move.From,
+		To:     result.Move.To,
+		Score:  result.Score,
+		Depth:  result.Depth,
+		Nodes:  result.Nodes,
+		TimeMs: result.TimeMs,
+	}
+	if result.Move.Promotion != 0 {
+		promo := int(result.Move.Promotion)
+		data.Promotion = &promo
+	}
+	raw, err := json.Marshal(data)
+	if err != nil {
+		return js.ValueOf(nil)
+	}
+	return js.ValueOf(string(raw))
+}
+
 func moveToJSON(move types.Move) interface{} {
 	moveJSON := struct {
 		From      int    `json:"from"`
@@ -110,6 +150,7 @@ func main() {
 	e.Set("gameStatus", js.FuncOf(gameStatusJS))
 	e.Set("aiMove", js.FuncOf(aiMoveJS))
 	e.Set("aiMoveDepth", js.FuncOf(aiMoveDepthJS))
+	e.Set("aiAnalysis", js.FuncOf(aiAnalysisJS))
 	js.Global().Set("goWasmEngine", e)
 	select {}
 }

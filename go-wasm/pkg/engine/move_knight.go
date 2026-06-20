@@ -2,7 +2,7 @@ package engine
 
 import "webassemble/pkg/types"
 
-var knightDirections = []int{-6, 6, 10, -10, 17, -17, 15, -15}
+var knightDirections = [8]int{-6, 6, 10, -10, 17, -17, 15, -15}
 
 // MoveKnight generates the 8 L-shaped jumps, filtered by board edges.
 func (p *Position) MoveKnight(piece types.Piece, i int, ml *MoveList) {

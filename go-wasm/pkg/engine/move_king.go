@@ -2,7 +2,7 @@ package engine
 
 import "webassemble/pkg/types"
 
-var kingDirections = []int{-1, 1, 8, -8, 7, -7, 9, -9}
+var kingDirections = [8]int{-1, 1, 8, -8, 7, -7, 9, -9}
 
 // MoveKing generates one-step king moves plus castling (kingside & queenside).
 //

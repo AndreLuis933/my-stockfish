@@ -3,7 +3,7 @@
 React 19 + TypeScript (strict) + Vite (Bun) frontend for two board games:
 
 - **Damas Brasileiras** (Brazilian Checkers) — fully playable, AI in TypeScript
-- **Xadrez** (Chess) — fully playable, including human-vs-AI; move generation and board state run in Go compiled to WebAssembly, AI runs in Go
+- **Xadrez** (Chess) — fully playable, including human-vs-AI and AI-vs-AI; move generation and board state run in Go compiled to WebAssembly, AI runs in Go
 
 ---
 
@@ -60,17 +60,20 @@ src/
 ├── components/
 │   ├── Board/             # Checkers board UI (Board.tsx + Board.module.css)
 │   ├── ChessBoard/        # Chess board UI (cburnett SVG pieces, selection + move hints + check glow)
+│   ├── MoveHistory/       # Move history sidebar (SAN notation, ply navigation, clocks display, result box)
 │   ├── PromotionPicker/   # Pawn promotion modal (Q/N/R/B)
 │   └── Nav/               # Top nav bar
 ├── pages/
 │   ├── checkers/          # Route /checkers (Checkers.tsx + Checkers.module.css)
 │   └── chess/             # Route /chess (Chess.tsx + Chess.hooks.ts + Chess.module.css)
 ├── hooks/useGame.ts       # Checkers state machine (uses TS AI)
+├── hooks/useChessClock.ts # Chess clock hook: dual countdown, increments, flag-fall detection
 ├── utils/
 │   ├── gameEngine.ts      # Checkers: move gen, captures, flying kings, applyMove
 │   ├── aiEngine.ts        # Checkers AI: Minimax + Alpha-Beta + IDDFS
 │   ├── chessEngine.ts     # Chess: emptyBoard(), pieceByte(), square helpers
-│   └── chessAssets.ts     # pieceImageUrl() → cburnett SVG path
+│   ├── chessAssets.ts     # pieceImageUrl() → cburnett SVG path
+│   └── chessNotation.ts   # Chess SAN-like notation generator (toSan, squareName, disambiguation, castling, promotion, check/mate suffixes)
 ├── types/
 │   ├── game.ts            # Checkers types (Color, PieceType, Piece, Cell, Board, Move)
 │   └── chess.ts           # Chess types (ChessColor, ChessPiece, ChessBoard, getPiece, decodePieceByte)
@@ -120,6 +123,7 @@ React component
 | `gameStatus` | — | `string` | `"playing" \| "white-wins" \| "black-wins" \| "draw"` |
 | `aiMove` | `number` (time limit ms) | JSON string `{from, to, promotion?}` | AI best move via time-limited search |
 | `aiMoveDepth` | `number` (depth) | JSON string `{from, to, promotion?}` | AI best move via fixed-depth search |
+| `aiAnalysis` | `number` (time limit ms) | JSON string `{from, to, promotion?, score, depth, nodes, timeMs}` | AI analysis: best move + evaluation + search info |
 
 ### Vite plugin (`plugins/go-wasm.ts`)
 
@@ -151,6 +155,16 @@ Handles everything automatically in dev mode:
   - **Custom time**: number input (10-60000ms) — exact time budget for the AI
   - **Custom depth**: number input (1-10) — fixed-depth search with no time limit
 - **"IA pensando..." indicator**: badge in turn banner while AI searches
+- **Move history sidebar**: SAN-like notation (e4, Nf3, exd5, O-O, e8=Q+, O-O-O#) with move-pair rows; click any move to jump to that position; navigation buttons (|<, <, >, >|) for start/prev/next/end; auto-scrolls to current ply; per-move evaluation tags shown when analysis is available
+- **Position navigation**: viewing past positions does not trigger the AI or allow board interaction; making a new move is only possible from the latest position; a "revisitando" badge appears in the turn banner when viewing history
+- **Chess clock**: dual countdown (white/black) with configurable initial time (1/3/5/10/15 min or no clock) and increment (0/2/3/5/10s); clock starts on the first move; increment added after each move; flag fall → loss; clock config disabled during an active game
+- **No auto-restart**: on game over the result overlay shows and stays until the user clicks "Jogar novamente"; the overlay has no close/cancel button — the user is forced to restart
+- **Move animations**: pieces slide to their destination on move (300ms cubic-bezier); captured pieces fade-out with a scale pulse; castling animates both king and rook sliding simultaneously; last-move squares are highlighted
+- **Coordinate labels**: file letters (a-h) and rank numbers (1-8) shown on the board edges, color-matched to the square (light on dark, dark on light)
+- **Keyboard navigation**: ArrowLeft/ArrowRight navigate history (prev/next ply), Home/End jump to start/end; disabled when the promotion picker is open (works even after game over)
+- **Position analysis**: "Analisar" button runs the AI search on the current position and shows the evaluation score (in pawns), best move (with an arrow drawn on the board), and search depth; closeable panel
+- **Auto-analyze**: "Analisar auto" toggle automatically runs a 500ms analysis after each move and stores the evaluation in the move history; per-move eval tags appear next to each move in the sidebar
+- **AI vs AI mode**: both sides played by the engine; search settings (difficulty/time/depth) apply to both; color selector hidden
 
 ## Damas (Checkers) features
 

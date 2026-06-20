@@ -116,6 +116,7 @@ export class WasmWorkerEngine extends WasmWorkerEngineCore implements WasmEngine
   gameStatus = this.fn("gameStatus");
   aiMove = this.fn("aiMove");
   aiMoveDepth = this.fn("aiMoveDepth");
+  aiAnalysis = this.fn("aiAnalysis");
 }
 
 export async function loadWasmEngine(): Promise<WasmEngine> {
