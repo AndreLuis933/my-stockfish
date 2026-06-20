@@ -2,14 +2,19 @@ package engine
 
 import "webassemble/pkg/types"
 
-// FindKing returns the board index of the king of the given color, or -1.
-func (p *Position) FindKing(color types.Piece) int {
-	for i, piece := range p.Board {
-		if piece&types.TypeMask == types.King && piece.Color() == color {
-			return i
-		}
+// kingColorIndex returns 0 for white, 1 for black — the index into
+// Position.KingSquares.
+func kingColorIndex(color types.Piece) int {
+	if color == types.ColorBlack {
+		return 1
 	}
-	return -1
+	return 0
+}
+
+// FindKing returns the board index of the king of the given color, or -1.
+// Uses the cached KingSquares for O(1) lookup.
+func (p *Position) FindKing(color types.Piece) int {
+	return p.KingSquares[kingColorIndex(color)]
 }
 
 // IsInCheck returns true if the king of `color` is currently attacked.

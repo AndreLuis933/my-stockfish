@@ -62,72 +62,103 @@ func (p *Position) Make(move types.Move) {
 	}
 
 	// Push undo info so Unmake can restore everything Make changes.
-	p.undoStack = append(p.undoStack, undoInfo{
+	p.undoStack[p.undoPly] = undoInfo{
 		captured:         move.Captured,
 		captureSquare:    captureSquare,
 		enPassantCapture: p.EnPassantCapture,
 		enPassantTarget:  p.EnPassantTarget,
 		castlingRights:   p.CastlingRights,
 		halfmoveClock:    p.HalfmoveClock,
-	})
+		evalScore:        p.EvalScore,
+	}
+	p.undoPly++
 
 	// Clear en passant state every move; only DoublePush sets a new one.
 	// (The old value is already saved in undoInfo above.)
 	p.EnPassantCapture, p.EnPassantTarget = -1, -1
 
+	// Incremental evaluation: adjust EvalScore for every piece that moves
+	// or is captured. signedPieceValue returns +val for white, -val for black,
+	// so removing a piece subtracts its contribution and adding a piece adds it.
+	// We compute the delta once and apply after the board switch.
+	var evalDelta int
+
 	switch move.Flag {
 	case types.FlagEnPassant:
-		// Remove the captured pawn (sits on the old EnPassantCapture square),
-		// move our pawn to `to`. The `to` square was empty.
 		p.Board[captureSquare] = 0
 		p.Board[from] = 0
 		p.Board[to] = piece
+		evalDelta -= signedPieceValue(move.Captured, captureSquare)
+		evalDelta -= signedPieceValue(piece, from)
+		evalDelta += signedPieceValue(piece, to)
 
 	case types.FlagDoublePush:
 		p.Board[from] = 0
 		p.Board[to] = piece
-		// The square the pawn skipped over is the e.p. target; the pawn's
-		// new square is where an enemy pawn would capture from.
 		p.EnPassantCapture = to
 		p.EnPassantTarget = (from + to) / 2
+		evalDelta -= signedPieceValue(piece, from)
+		evalDelta += signedPieceValue(piece, to)
 
 	case types.FlagCastleK:
 		p.Board[from] = 0
 		p.Board[to] = piece
-		// Rook from h-file to f-file (king's right).
 		rook := p.Board[to+1]
 		p.Board[to+1] = 0
 		p.Board[to-1] = rook
+		rookFrom, rookTo := to+1, to-1
+		evalDelta -= signedPieceValue(piece, from)
+		evalDelta += signedPieceValue(piece, to)
+		evalDelta -= signedPieceValue(rook, rookFrom)
+		evalDelta += signedPieceValue(rook, rookTo)
 
 	case types.FlagCastleQ:
 		p.Board[from] = 0
 		p.Board[to] = piece
-		// Rook from a-file to d-file (king's left).
 		rook := p.Board[to-2]
 		p.Board[to-2] = 0
 		p.Board[to+1] = rook
+		rookFrom, rookTo := to-2, to+1
+		evalDelta -= signedPieceValue(piece, from)
+		evalDelta += signedPieceValue(piece, to)
+		evalDelta -= signedPieceValue(rook, rookFrom)
+		evalDelta += signedPieceValue(rook, rookTo)
 
 	case types.FlagPromotion:
 		p.Board[from] = 0
+		var promoPiece types.Piece
 		if move.Promotion != 0 {
-			p.Board[to] = move.Promotion
+			promoPiece = move.Promotion
 		} else {
-			// Fallback: promotion move built without a Promotion piece
-			// (e.g. from the raw bridge path) — default to Queen.
-			p.Board[to] = piece | types.Queen
+			promoPiece = piece | types.Queen
+		}
+		p.Board[to] = promoPiece
+		evalDelta -= signedPieceValue(piece, from)
+		evalDelta += signedPieceValue(promoPiece, to)
+		if move.Captured != 0 {
+			evalDelta -= signedPieceValue(move.Captured, to)
 		}
 
 	default: // FlagNormal
 		p.Board[from] = 0
 		p.Board[to] = piece
+		evalDelta -= signedPieceValue(piece, from)
+		evalDelta += signedPieceValue(piece, to)
+		if move.Captured != 0 {
+			evalDelta -= signedPieceValue(move.Captured, to)
+		}
 	}
+
+	p.EvalScore += evalDelta
 
 	// Castling rights — king move clears that color's rights.
 	if piece&types.King == types.King {
 		if piece.Color() == types.ColorWhite {
 			p.CastlingRights &^= types.CastleWhiteAll
+			p.KingSquares[0] = to
 		} else {
 			p.CastlingRights &^= types.CastleBlackAll
+			p.KingSquares[1] = to
 		}
 	}
 
@@ -182,9 +213,8 @@ func (p *Position) Unmake(move types.Move) {
 	p.WhiteToMove = !p.WhiteToMove
 
 	// Pop undo info from the stack.
-	n := len(p.undoStack) - 1
-	undo := p.undoStack[n]
-	p.undoStack = p.undoStack[:n]
+	p.undoPly--
+	undo := p.undoStack[p.undoPly]
 
 	// Restore the moving piece to its origin. For promotions, the piece on
 	// `to` is the promoted piece — we need to put the original pawn back on
@@ -227,11 +257,22 @@ func (p *Position) Unmake(move types.Move) {
 		p.Board[to] = undo.captured
 	}
 
-	// Restore the pre-move en passant, castling, and clock state.
+	// Restore cached king square if the king was the moving piece.
+	movedPiece := p.Board[from]
+	if movedPiece&types.TypeMask == types.King {
+		if movedPiece.Color() == types.ColorWhite {
+			p.KingSquares[0] = from
+		} else {
+			p.KingSquares[1] = from
+		}
+	}
+
+	// Restore the pre-move en passant, castling, clock, and eval state.
 	p.EnPassantCapture = undo.enPassantCapture
 	p.EnPassantTarget = undo.enPassantTarget
 	p.CastlingRights = undo.castlingRights
 	p.HalfmoveClock = undo.halfmoveClock
+	p.EvalScore = undo.evalScore
 
 	// Fullmove number — decrement if we're undoing a black move (i.e., after
 	// the side flip above, WhiteToMove is now false meaning black was to move).

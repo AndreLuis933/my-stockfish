@@ -15,21 +15,33 @@ type Position struct {
 	HalfmoveClock    int // plies since last pawn move or capture (for 50-move rule)
 	FullmoveNumber   int // increments after black's move
 
-	// undoStack records the state needed to reverse a Make call via Unmake.
-	// Each Make pushes one undoInfo; each Unmake pops it. This is the standard
-	// make/unmake pattern — far faster than copying the whole board per node.
-	undoStack []undoInfo
+	// KingSquares caches the king positions for O(1) check detection.
+	// Updated incrementally in Make/Unmake. -1 means "not on board".
+	KingSquares [2]int // [white=0, black=1]
+
+	// EvalScore is the incremental static evaluation (white material+PST minus
+	// black material+PST), maintained by Make/Unmake. Evaluate() reads this
+	// and negates for the side-to-move perspective.
+	EvalScore int
+
+	// undoStack is a fixed-size stack of undo info, enabling O(1) Make/Unmake
+	// with zero heap allocation. 256 is well beyond any realistic search depth.
+	undoStack  [maxPly]undoInfo
+	undoPly    int
 }
+
+const maxPly = 256
 
 // undoInfo holds exactly what Make overwrites, so Unmake can restore it.
 // Storing the pre-move values here means we don't need to recompute them.
 type undoInfo struct {
-	captured         types.Piece // piece that was on the capture square (0 if none) — for en passant this is the captured pawn
-	captureSquare    int         // where the captured piece was (== move.To, except en passant)
-	enPassantCapture int         // pre-move EnPassantCapture
-	enPassantTarget  int         // pre-move EnPassantTarget
-	castlingRights   types.CastlingRights // pre-move castling rights
-	halfmoveClock    int         // pre-move halfmove clock
+	captured         types.Piece
+	captureSquare    int
+	enPassantCapture int
+	enPassantTarget  int
+	castlingRights   types.CastlingRights
+	halfmoveClock    int
+	evalScore        int
 }
 
 // Game is the single global Position used by the WASM bridge and the legacy
@@ -38,6 +50,7 @@ type undoInfo struct {
 var Game = &Position{
 	EnPassantTarget:  -1,
 	EnPassantCapture: -1,
+	KingSquares:      [2]int{-1, -1},
 }
 
 // reset empties the position (used by tests and before LoadFen).
@@ -49,5 +62,7 @@ func (p *Position) reset() {
 	p.EnPassantCapture = -1
 	p.HalfmoveClock = 0
 	p.FullmoveNumber = 0
-	p.undoStack = p.undoStack[:0]
+	p.KingSquares = [2]int{-1, -1}
+	p.EvalScore = 0
+	p.undoPly = 0
 }

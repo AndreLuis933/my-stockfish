@@ -57,6 +57,13 @@ func (p *Position) LoadFen(fen string) {
 			case c >= 'a' && c <= 'z':
 				p.Board[index] = pieceFromLetter[byte(unicode.ToLower(rune(c)))] | types.ColorBlack
 			}
+			if p.Board[index]&types.TypeMask == types.King {
+				if p.Board[index]&types.ColorMask == types.ColorWhite {
+					p.KingSquares[0] = index
+				} else {
+					p.KingSquares[1] = index
+				}
+			}
 			row++
 		}
 	}
@@ -115,6 +122,15 @@ func (p *Position) LoadFen(fen string) {
 		}
 	} else {
 		p.FullmoveNumber = 1
+	}
+
+	// Compute the initial incremental evaluation score.
+	p.EvalScore = 0
+	for i, piece := range p.Board {
+		if piece == 0 {
+			continue
+		}
+		p.EvalScore += signedPieceValue(piece, i)
 	}
 }
 

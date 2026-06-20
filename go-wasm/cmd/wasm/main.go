@@ -66,7 +66,7 @@ func aiMoveJS(_ js.Value, args []js.Value) interface{} {
 	if len(args) > 0 && !args[0].IsUndefined() && args[0].Type() == js.TypeNumber {
 		timeLimitMs = args[0].Int()
 	}
-	result := ai.Search(engine.Game, timeLimitMs)
+	result := ai.Search(engine.Game, timeLimitMs, nil)
 	return moveToJSON(result.Move)
 }
 
@@ -77,7 +77,7 @@ func aiMoveDepthJS(_ js.Value, args []js.Value) interface{} {
 	if len(args) > 0 && !args[0].IsUndefined() && args[0].Type() == js.TypeNumber {
 		depth = args[0].Int()
 	}
-	result := ai.SearchFixedDepth(engine.Game, depth)
+	result := ai.SearchFixedDepth(engine.Game, depth, nil)
 	return moveToJSON(result.Move)
 }
 
@@ -89,7 +89,7 @@ func aiAnalysisJS(_ js.Value, args []js.Value) interface{} {
 	if len(args) > 0 && !args[0].IsUndefined() && args[0].Type() == js.TypeNumber {
 		timeLimitMs = args[0].Int()
 	}
-	result := ai.Search(engine.Game, timeLimitMs)
+	result := ai.Search(engine.Game, timeLimitMs, nil)
 	return analysisToJSON(result)
 }
 

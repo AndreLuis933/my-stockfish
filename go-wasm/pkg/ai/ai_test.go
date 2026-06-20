@@ -13,7 +13,7 @@ import (
 func searchBest(t *testing.T, fen string, timeLimitMs int) SearchResult {
 	t.Helper()
 	engine.LoadFen(fen)
-	result := Search(engine.Game, timeLimitMs)
+	result := Search(engine.Game, timeLimitMs, nil)
 	if result.Depth == 0 {
 		t.Fatal("AI returned no move (depth 0)")
 	}
@@ -92,7 +92,7 @@ func TestWinsHangingPiece(t *testing.T) {
 	// White knight on c5 is undefended; black to move should capture it with the bishop.
 	// After 1...Bxc5, black is up a knight (320 points).
 	engine.LoadFen("r1bqkbnr/pppp1ppp/2n5/2N5/8/8/PPPPPPPP/R1BQKBNR b KQkq - 0 1")
-	result := Search(engine.Game, 2000)
+	result := Search(engine.Game, 2000, nil)
 
 	if result.Depth == 0 {
 		t.Fatal("AI returned no move")
@@ -153,7 +153,7 @@ func TestNodeTypeConsistency(t *testing.T) {
 	engine.LoadFen(engine.StartingFEN)
 	original := engine.Game.Board
 
-	Search(engine.Game, 300)
+	Search(engine.Game, 300, nil)
 
 	for i, piece := range engine.Game.Board {
 		if piece != original[i] {
@@ -186,7 +186,7 @@ func TestDepthScaling(t *testing.T) {
 
 	for _, limit := range timeLimits {
 		engine.LoadFen(engine.StartingFEN)
-		result := Search(engine.Game, limit)
+		result := Search(engine.Game, limit, nil)
 
 		nps := int64(0)
 		if result.TimeMs > 0 {
@@ -223,7 +223,7 @@ func TestDepthScalingPerPosition(t *testing.T) {
 
 	for _, pos := range positions {
 		engine.LoadFen(pos.fen)
-		result := Search(engine.Game, timeLimit)
+		result := Search(engine.Game, timeLimit, nil)
 
 		nps := int64(0)
 		if result.TimeMs > 0 {
@@ -245,7 +245,7 @@ func BenchmarkSearchDepth1(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		engine.LoadFen(engine.StartingFEN)
-		Search(engine.Game, 100000) // very high limit — depth 1 finishes instantly
+		Search(engine.Game, 100000, nil) // very high limit — depth 1 finishes instantly
 	}
 }
 
@@ -254,7 +254,7 @@ func BenchmarkSearchStartingPosition(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		engine.LoadFen(engine.StartingFEN)
-		Search(engine.Game, 1000)
+		Search(engine.Game, 1000, nil)
 	}
 }
 
@@ -310,27 +310,41 @@ func TestFixedDepthMeasuresNPS(t *testing.T) {
 
 // searchFixedDepth runs a fixed-depth search with no time limit.
 func searchFixedDepth(p *engine.Position, depth int) SearchResult {
-	ctx := &searchCtx{
-		startTime:   nowMs(),
-		timeLimitMs: 1e18, // effectively infinite
+	return SearchFixedDepth(p, depth, nil)
+}
+
+// TestIterativeVsDirect compares the node count of iterative deepening to
+// depth N vs a direct search at depth N. ID searches depths 1..N, so it does
+// extra work at shallow depths — but the previousBest hint improves cutoffs
+// at the target depth, so it may recover some of that cost.
+func TestIterativeVsDirect(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
 	}
 
-	var best SearchResult
-	var previousBest *types.Move
+	depths := []int{1, 2, 3, 4, 5, 6}
 
-	for d := 1; d <= depth; d++ {
-		move, score, complete := searchAtDepth(p, d, ctx, previousBest)
-		if !complete {
-			break
+	t.Log("┌───────┬──────────────┬──────────────┬───────────┐")
+	t.Log("│ depth │ ID nodes     │ direct nodes │ ID/direct │")
+	t.Log("├───────┼──────────────┼──────────────┼───────────┤")
+
+	for _, depth := range depths {
+		// ID to `depth`: huge time limit so it won't abort, depth cap = depth.
+		engine.LoadFen(engine.StartingFEN)
+		ctx := &searchCtx{startTime: nowMs(), timeLimitMs: 1e18}
+		idResult := iterativeDeepening(engine.Game, ctx, depth)
+
+		engine.LoadFen(engine.StartingFEN)
+		directResult := SearchFixedDepth(engine.Game, depth, nil)
+
+		ratio := float64(0)
+		if directResult.Nodes > 0 {
+			ratio = float64(idResult.Nodes) / float64(directResult.Nodes)
 		}
-		previousBest = &move
-		best = SearchResult{
-			Move:  move,
-			Score: score,
-			Depth: d,
-			Nodes: ctx.nodes,
-		}
+
+		t.Log(fmt.Sprintf("│  %2d   │ %12d │ %12d │    %.2f   │",
+			depth, idResult.Nodes, directResult.Nodes, ratio))
 	}
 
-	return best
+	t.Log("└───────┴──────────────┴──────────────┴───────────┘")
 }
