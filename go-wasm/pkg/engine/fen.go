@@ -132,6 +132,9 @@ func (p *Position) LoadFen(fen string) {
 		}
 		p.EvalScore += signedPieceValue(piece, i)
 	}
+
+	// Compute the initial Zobrist hash.
+	p.Hash = p.ComputeHash()
 }
 
 // squareToIndex converts algebraic notation (e.g. "e4", "d6") to a board

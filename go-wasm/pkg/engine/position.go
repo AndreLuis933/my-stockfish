@@ -15,6 +15,10 @@ type Position struct {
 	HalfmoveClock    int // plies since last pawn move or capture (for 50-move rule)
 	FullmoveNumber   int // increments after black's move
 
+	// Hash is the Zobrist hash of the full position state, maintained
+	// incrementally by Make/Unmake. Used by the transposition table.
+	Hash uint64
+
 	// KingSquares caches the king positions for O(1) check detection.
 	// Updated incrementally in Make/Unmake. -1 means "not on board".
 	KingSquares [2]int // [white=0, black=1]
@@ -26,8 +30,8 @@ type Position struct {
 
 	// undoStack is a fixed-size stack of undo info, enabling O(1) Make/Unmake
 	// with zero heap allocation. 256 is well beyond any realistic search depth.
-	undoStack  [maxPly]undoInfo
-	undoPly    int
+	undoStack [maxPly]undoInfo
+	undoPly   int
 }
 
 const maxPly = 256
@@ -42,6 +46,7 @@ type undoInfo struct {
 	castlingRights   types.CastlingRights
 	halfmoveClock    int
 	evalScore        int
+	hash             uint64
 }
 
 // Game is the single global Position used by the WASM bridge and the legacy
@@ -52,6 +57,8 @@ var Game = &Position{
 	EnPassantCapture: -1,
 	KingSquares:      [2]int{-1, -1},
 }
+
+func (p *Position) Ply() int { return p.undoPly }
 
 // reset empties the position (used by tests and before LoadFen).
 func (p *Position) reset() {
@@ -64,5 +71,6 @@ func (p *Position) reset() {
 	p.FullmoveNumber = 0
 	p.KingSquares = [2]int{-1, -1}
 	p.EvalScore = 0
+	p.Hash = 0
 	p.undoPly = 0
 }

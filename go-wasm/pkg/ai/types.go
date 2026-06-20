@@ -1,12 +1,15 @@
 package ai
 
-import "webassemble/pkg/types"
+import (
+	"webassemble/pkg/engine"
+	"webassemble/pkg/types"
+)
 
 const (
-	winScore      = 100_000
+	winScore      = 30_000
 	nodeCheckMask = 2047
 	maxDepth      = 32
-	negInf        = -1 << 30
+	negInf        = -32_000
 )
 
 // SearchResult holds the outcome of an iterative deepening search.
@@ -18,13 +21,14 @@ type SearchResult struct {
 	TimeMs int64
 }
 
-// searchCtx tracks time, node count, and abort state across the recursion.
+// searchCtx tracks time, node count, abort state, and TT across the recursion.
 type searchCtx struct {
 	startTime   float64
 	timeLimitMs float64
 	nodes       int
 	aborted     bool
 	stopCh      <-chan struct{}
+	tt          *engine.TranspositionTable
 }
 
 // shouldStop checks if the search has exceeded its time budget or received an

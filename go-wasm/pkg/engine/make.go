@@ -70,18 +70,27 @@ func (p *Position) Make(move types.Move) {
 		castlingRights:   p.CastlingRights,
 		halfmoveClock:    p.HalfmoveClock,
 		evalScore:        p.EvalScore,
+		hash:             p.Hash,
 	}
 	p.undoPly++
+
+	// Save old state for hash delta computation.
+	oldCastle := p.CastlingRights
+	oldEPFile := -1
+	if p.EnPassantTarget >= 0 {
+		oldEPFile = p.EnPassantTarget % 8
+	}
 
 	// Clear en passant state every move; only DoublePush sets a new one.
 	// (The old value is already saved in undoInfo above.)
 	p.EnPassantCapture, p.EnPassantTarget = -1, -1
 
-	// Incremental evaluation: adjust EvalScore for every piece that moves
-	// or is captured. signedPieceValue returns +val for white, -val for black,
-	// so removing a piece subtracts its contribution and adding a piece adds it.
-	// We compute the delta once and apply after the board switch.
+	// Incremental evaluation + hash: adjust EvalScore and Hash for every piece
+	// that moves or is captured. signedPieceValue returns +val for white,
+	// -val for black, so removing a piece subtracts its contribution and adding
+	// a piece adds it. Hash uses XOR (its own inverse).
 	var evalDelta int
+	var hashDelta uint64
 
 	switch move.Flag {
 	case types.FlagEnPassant:
@@ -91,6 +100,8 @@ func (p *Position) Make(move types.Move) {
 		evalDelta -= signedPieceValue(move.Captured, captureSquare)
 		evalDelta -= signedPieceValue(piece, from)
 		evalDelta += signedPieceValue(piece, to)
+		hashDelta ^= hashDeltaPiece(move.Captured, captureSquare)
+		hashDelta ^= hashDeltaMove(piece, from, to)
 
 	case types.FlagDoublePush:
 		p.Board[from] = 0
@@ -99,6 +110,7 @@ func (p *Position) Make(move types.Move) {
 		p.EnPassantTarget = (from + to) / 2
 		evalDelta -= signedPieceValue(piece, from)
 		evalDelta += signedPieceValue(piece, to)
+		hashDelta ^= hashDeltaMove(piece, from, to)
 
 	case types.FlagCastleK:
 		p.Board[from] = 0
@@ -111,6 +123,8 @@ func (p *Position) Make(move types.Move) {
 		evalDelta += signedPieceValue(piece, to)
 		evalDelta -= signedPieceValue(rook, rookFrom)
 		evalDelta += signedPieceValue(rook, rookTo)
+		hashDelta ^= hashDeltaMove(piece, from, to)
+		hashDelta ^= hashDeltaMove(rook, rookFrom, rookTo)
 
 	case types.FlagCastleQ:
 		p.Board[from] = 0
@@ -123,6 +137,8 @@ func (p *Position) Make(move types.Move) {
 		evalDelta += signedPieceValue(piece, to)
 		evalDelta -= signedPieceValue(rook, rookFrom)
 		evalDelta += signedPieceValue(rook, rookTo)
+		hashDelta ^= hashDeltaMove(piece, from, to)
+		hashDelta ^= hashDeltaMove(rook, rookFrom, rookTo)
 
 	case types.FlagPromotion:
 		p.Board[from] = 0
@@ -138,6 +154,11 @@ func (p *Position) Make(move types.Move) {
 		if move.Captured != 0 {
 			evalDelta -= signedPieceValue(move.Captured, to)
 		}
+		hashDelta ^= hashDeltaPiece(piece, from)
+		hashDelta ^= hashDeltaPiece(promoPiece, to)
+		if move.Captured != 0 {
+			hashDelta ^= hashDeltaPiece(move.Captured, to)
+		}
 
 	default: // FlagNormal
 		p.Board[from] = 0
@@ -147,11 +168,15 @@ func (p *Position) Make(move types.Move) {
 		if move.Captured != 0 {
 			evalDelta -= signedPieceValue(move.Captured, to)
 		}
+		hashDelta ^= hashDeltaMove(piece, from, to)
+		if move.Captured != 0 {
+			hashDelta ^= hashDeltaPiece(move.Captured, to)
+		}
 	}
 
 	p.EvalScore += evalDelta
 
-	// Castling rights — king move clears that color's rights.
+	// Update castling rights and track if they changed (for hash).
 	if piece&types.King == types.King {
 		if piece.Color() == types.ColorWhite {
 			p.CastlingRights &^= types.CastleWhiteAll
@@ -162,7 +187,6 @@ func (p *Position) Make(move types.Move) {
 		}
 	}
 
-	// Castling rights — rook moves from origin, or rook captured on origin.
 	if piece&types.Rook == types.Rook || move.Captured&types.Rook == types.Rook {
 		switch {
 		case from == 0 || to == 0:
@@ -175,6 +199,23 @@ func (p *Position) Make(move types.Move) {
 			p.CastlingRights &^= types.CastleBlackK
 		}
 	}
+
+	// Hash: castling rights change.
+	if oldCastle != p.CastlingRights {
+		hashDelta ^= zobristCastle[oldCastle]
+		hashDelta ^= zobristCastle[p.CastlingRights]
+	}
+
+	// Hash: en passant target change.
+	if oldEPFile >= 0 {
+		hashDelta ^= zobristEP[oldEPFile]
+	}
+	if p.EnPassantTarget >= 0 {
+		hashDelta ^= zobristEP[p.EnPassantTarget%8]
+	}
+
+	// Hash: side to move flip.
+	hashDelta ^= zobristSide
 
 	// Halfmove clock — resets to 0 on pawn moves and captures, else increments.
 	// The 50-move rule: if this clock reaches 100 (50 full moves without a
@@ -196,6 +237,7 @@ func (p *Position) Make(move types.Move) {
 	}
 
 	p.WhiteToMove = !p.WhiteToMove
+	p.Hash ^= hashDelta
 }
 
 // Unmake reverses the most recent Make call, restoring the position to its
@@ -267,12 +309,13 @@ func (p *Position) Unmake(move types.Move) {
 		}
 	}
 
-	// Restore the pre-move en passant, castling, clock, and eval state.
+	// Restore the pre-move en passant, castling, clock, eval, and hash state.
 	p.EnPassantCapture = undo.enPassantCapture
 	p.EnPassantTarget = undo.enPassantTarget
 	p.CastlingRights = undo.castlingRights
 	p.HalfmoveClock = undo.halfmoveClock
 	p.EvalScore = undo.evalScore
+	p.Hash = undo.hash
 
 	// Fullmove number — decrement if we're undoing a black move (i.e., after
 	// the side flip above, WhiteToMove is now false meaning black was to move).

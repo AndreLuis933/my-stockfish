@@ -12,7 +12,7 @@ import (
 // Used by time-limited search, where the max reachable depth is unknown — if
 // the time runs out mid-depth, we fall back to the best move from the previous
 // depth. The previous depth's best move is searched first at each new depth to
-// maximize alpha-beta cutoffs.
+// maximize alpha-beta cutoffs. The TT accumulates across all depths.
 func iterativeDeepening(p *engine.Position, ctx *searchCtx, depthCap int) SearchResult {
 	var best SearchResult
 	var previousBest *types.Move
@@ -41,36 +41,56 @@ func iterativeDeepening(p *engine.Position, ctx *searchCtx, depthCap int) Search
 // Search runs iterative deepening with a time budget. Returns the best move
 // from the last fully-completed depth. Pass stopCh=nil for time-only abort;
 // pass a closeable channel to allow external cancellation.
+//
+// A 16MB transposition table is created per call. For repeated searches on
+// the same position tree (e.g. a full game), reuse a TT via SearchWithTT.
 func Search(p *engine.Position, timeLimitMs int, stopCh <-chan struct{}) SearchResult {
+	tt := engine.DefaultTranspositionTable()
 	ctx := &searchCtx{
 		startTime:   nowMs(),
 		timeLimitMs: float64(timeLimitMs),
 		stopCh:      stopCh,
+		tt:          tt,
 	}
 	return iterativeDeepening(p, ctx, maxDepth)
 }
 
-// SearchFixedDepth searches directly to the given depth — no iterative
-// deepening. This is faster than ID when the target depth is known in advance
-// (benchmarks, tests, depth-limited play) because it skips the shallower
-// passes. Pass stopCh=nil to disable external abort.
+// SearchWithTT runs iterative deepening with a caller-provided transposition
+// table. The TT is not cleared — entries accumulate across searches, which
+// improves hit rates in games where positions recur. Call tt.Clear() between
+// games if needed.
+func SearchWithTT(p *engine.Position, timeLimitMs int, stopCh <-chan struct{}, tt *engine.TranspositionTable) SearchResult {
+	ctx := &searchCtx{
+		startTime:   nowMs(),
+		timeLimitMs: float64(timeLimitMs),
+		stopCh:      stopCh,
+		tt:          tt,
+	}
+	return iterativeDeepening(p, ctx, maxDepth)
+}
+
+// SearchFixedDepth searches to the given depth. Uses iterative deepening
+// internally so that if the search is aborted (e.g. by a UCI "stop" command),
+// it can return the best move from the last completed depth instead of an
+// empty result. Pass stopCh=nil to disable external abort.
 func SearchFixedDepth(p *engine.Position, depth int, stopCh <-chan struct{}) SearchResult {
+	tt := engine.DefaultTranspositionTable()
 	ctx := &searchCtx{
 		startTime:   nowMs(),
 		timeLimitMs: 1e18,
 		stopCh:      stopCh,
+		tt:          tt,
 	}
+	return iterativeDeepening(p, ctx, depth)
+}
 
-	score, move := negamax(p, depth, negInf, -negInf, ctx, nil)
-	if ctx.aborted {
-		return SearchResult{}
+// SearchFixedDepthWithTT is the caller-provided-TT variant of SearchFixedDepth.
+func SearchFixedDepthWithTT(p *engine.Position, depth int, stopCh <-chan struct{}, tt *engine.TranspositionTable) SearchResult {
+	ctx := &searchCtx{
+		startTime:   nowMs(),
+		timeLimitMs: 1e18,
+		stopCh:      stopCh,
+		tt:          tt,
 	}
-
-	return SearchResult{
-		Move:   move,
-		Score:  score,
-		Depth:  depth,
-		Nodes:  ctx.nodes,
-		TimeMs: int64(nowMs() - ctx.startTime),
-	}
+	return iterativeDeepening(p, ctx, depth)
 }

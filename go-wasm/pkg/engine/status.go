@@ -48,8 +48,15 @@ func CurrentStatus() GameStatus {
 	return Game.CurrentStatus()
 }
 
-// CurrentStatus computes the status for this position.
+// CurrentStatus computes the status for this position. Checks for all draw
+// rules (50-move, threefold repetition, insufficient material), checkmate,
+// and stalemate.
 func (p *Position) CurrentStatus() GameStatus {
+	// Draw rules that don't require move generation.
+	if p.IsDraw() {
+		return StatusDraw
+	}
+
 	color := p.colorOfSide()
 	var ml MoveList
 	p.LegalMoves(&ml)

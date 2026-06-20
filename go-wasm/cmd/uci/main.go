@@ -318,6 +318,19 @@ func (s *uciSession) handleGo(parts []string) {
 
 	go func() {
 		defer close(done)
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Fprintf(os.Stderr, "search panic: %v\n", r)
+				var ml engine.MoveList
+				searchPos.LegalMoves(&ml)
+				moveStr := "0000"
+				if ml.Len() > 0 {
+					moveStr = moveToUCI(ml.Get(0))
+				}
+				os.Stdout.WriteString("bestmove " + moveStr + "\n")
+				os.Stdout.Sync()
+			}
+		}()
 		var result ai.SearchResult
 		if gp.depth > 0 {
 			result = ai.SearchFixedDepth(&searchPos, gp.depth, stopCh)
@@ -325,7 +338,17 @@ func (s *uciSession) handleGo(parts []string) {
 			result = ai.Search(&searchPos, int(timeMs), stopCh)
 		}
 		printInfo(result)
-		fmt.Println("bestmove", moveToUCI(result.Move))
+
+		moveStr := moveToUCI(result.Move)
+		if result.Move.From == 0 && result.Move.To == 0 {
+			var ml engine.MoveList
+			searchPos.LegalMoves(&ml)
+			if ml.Len() > 0 {
+				moveStr = moveToUCI(ml.Get(0))
+			}
+		}
+		os.Stdout.WriteString("bestmove " + moveStr + "\n")
+		os.Stdout.Sync()
 	}()
 }
 
