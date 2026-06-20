@@ -5,6 +5,8 @@ import { useWasm } from "@/wasm/useWasm";
 
 export type ChessGameMode = "human-vs-ai" | "human-vs-human";
 export type ChessResult = "white-wins" | "black-wins" | "draw" | null;
+export type ChessDifficulty = "easy" | "medium" | "hard";
+export type ChessSearchMode = "difficulty" | "time" | "depth";
 
 export interface PendingPromotion {
   from: number;
@@ -27,6 +29,7 @@ interface ChessState {
   pendingPromotion: PendingPromotion | null;
   candidateMoves: Move[];
   checkSquare: number | null;
+  aiThinking: boolean;
 }
 
 const initialState = (): ChessState => ({
@@ -38,15 +41,13 @@ const initialState = (): ChessState => ({
   pendingPromotion: null,
   candidateMoves: [],
   checkSquare: null,
+  aiThinking: false,
 });
 
 const pieceColor = (byte: number): ChessColor | null => {
   if (!byte) return null;
   return (byte & 0b11000000) === 0b01000000 ? "white" : "black";
 };
-
-const isAiTurn = (mode: ChessGameMode, color: ChessColor): boolean =>
-  mode === "human-vs-ai" && color === "black";
 
 const toResult = (status: string): ChessResult => {
   if (status === "white-wins" || status === "black-wins" || status === "draw") {
@@ -55,7 +56,22 @@ const toResult = (status: string): ChessResult => {
   return null;
 };
 
-export const useChess = (mode: ChessGameMode = "human-vs-ai") => {
+const DIFFICULTY_MS: Record<ChessDifficulty, number> = {
+  easy: 100,
+  medium: 500,
+  hard: 2000,
+};
+
+const AI_DELAY_MS = 400;
+
+export const useChess = (
+  mode: ChessGameMode = "human-vs-human",
+  aiColor: ChessColor = "black",
+  difficulty: ChessDifficulty = "medium",
+  searchMode: ChessSearchMode = "difficulty",
+  customTimeMs: number = 1000,
+  customDepth: number = 4,
+) => {
   const [state, setState] = useState<ChessState>(initialState);
   const stateRef = useRef(state);
 
@@ -65,6 +81,14 @@ export const useChess = (mode: ChessGameMode = "human-vs-ai") => {
 
   const { engine } = useWasm();
 
+  const { currentPlayer, result } = state;
+
+  const isAiTurn = useCallback(
+    (color: ChessColor): boolean => mode === "human-vs-ai" && color === aiColor,
+    [mode, aiColor],
+  );
+
+  // Load initial board
   useEffect(() => {
     if (!engine) return;
 
@@ -90,6 +114,61 @@ export const useChess = (mode: ChessGameMode = "human-vs-ai") => {
     };
   }, [engine]);
 
+  // AI turn effect — fires when it's the AI's turn and the engine is ready
+  useEffect(() => {
+    if (!engine || result !== null) return;
+    if (mode !== "human-vs-ai") return;
+    if (currentPlayer !== aiColor) return;
+
+    const currentEngine = engine;
+    let cancelled = false;
+
+    const timer = setTimeout(async () => {
+      setState((p) => ({ ...p, aiThinking: true }));
+
+      let moveJson: string;
+      if (searchMode === "depth") {
+        moveJson = await currentEngine.aiMoveDepth(customDepth);
+      } else if (searchMode === "time") {
+        moveJson = await currentEngine.aiMove(customTimeMs);
+      } else {
+        moveJson = await currentEngine.aiMove(DIFFICULTY_MS[difficulty]);
+      }
+      const aiMove: Move = JSON.parse(moveJson);
+
+      if (cancelled) return;
+
+      const rawBoard = await currentEngine.makeMove(
+        aiMove.from,
+        aiMove.to,
+        aiMove.promotion,
+      );
+      const checkSquare = await currentEngine.isCheckJS();
+      const status = await currentEngine.gameStatus();
+      const nextPlayer: ChessColor = aiColor === "white" ? "black" : "white";
+
+      if (cancelled) return;
+
+      setState((p) => ({
+        ...p,
+        board: Array.from(rawBoard),
+        selectedSquare: null,
+        validMoveSquares: [],
+        candidateMoves: [],
+        currentPlayer: nextPlayer,
+        checkSquare: checkSquare === -1 ? null : checkSquare,
+        result: toResult(status),
+        aiThinking: false,
+      }));
+    }, AI_DELAY_MS);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      setState((p) => ({ ...p, aiThinking: false }));
+    };
+  }, [engine, mode, aiColor, difficulty, searchMode, customTimeMs, customDepth, currentPlayer, result]);
+
   const handleSquareClick = useCallback(
     async (index: number) => {
       if (!engine) {
@@ -99,7 +178,7 @@ export const useChess = (mode: ChessGameMode = "human-vs-ai") => {
 
       const prev = stateRef.current;
 
-      if (prev.result !== null || isAiTurn(mode, prev.currentPlayer)) return;
+      if (prev.result !== null || prev.aiThinking || isAiTurn(prev.currentPlayer)) return;
 
       const clickedColor = pieceColor(prev.board[index]);
 
@@ -174,7 +253,7 @@ export const useChess = (mode: ChessGameMode = "human-vs-ai") => {
         return { ...p, validMoveSquares: targets, candidateMoves: ownMoves };
       });
     },
-    [engine, mode],
+    [engine, isAiTurn],
   );
 
   const restartGame = useCallback(async () => {

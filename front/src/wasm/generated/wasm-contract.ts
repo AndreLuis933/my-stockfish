@@ -5,6 +5,8 @@ export interface WasmContract {
   makeMove: { args: [number, number, number?]; return: number[] };
   isCheckJS: { args: []; return: number };
   gameStatus: { args: []; return: string };
+  aiMove: { args: [number]; return: string };
+  aiMoveDepth: { args: [number]; return: string };
 }
 ;
 export type WasmFunctionName = keyof WasmContract;

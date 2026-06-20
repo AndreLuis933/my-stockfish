@@ -5,7 +5,9 @@ package main
 import (
 	"encoding/json"
 	"syscall/js"
+	"webassemble/pkg/ai"
 	"webassemble/pkg/engine"
+	"webassemble/pkg/types"
 )
 
 func getBoard() interface{} {
@@ -58,6 +60,47 @@ func initBoardJs(_ js.Value, _ []js.Value) interface{} {
 	return getBoard()
 }
 
+// aiMoveJS runs a time-limited AI search and returns the best move as JSON.
+func aiMoveJS(_ js.Value, args []js.Value) interface{} {
+	timeLimitMs := 500
+	if len(args) > 0 && !args[0].IsUndefined() && args[0].Type() == js.TypeNumber {
+		timeLimitMs = args[0].Int()
+	}
+	result := ai.Search(engine.Game, timeLimitMs)
+	return moveToJSON(result.Move)
+}
+
+// aiMoveDepthJS runs a fixed-depth AI search (no time limit) and returns the
+// best move as JSON. Used for testing/benchmarking in the browser.
+func aiMoveDepthJS(_ js.Value, args []js.Value) interface{} {
+	depth := 4
+	if len(args) > 0 && !args[0].IsUndefined() && args[0].Type() == js.TypeNumber {
+		depth = args[0].Int()
+	}
+	result := ai.SearchFixedDepth(engine.Game, depth)
+	return moveToJSON(result.Move)
+}
+
+func moveToJSON(move types.Move) interface{} {
+	moveJSON := struct {
+		From      int    `json:"from"`
+		To        int    `json:"to"`
+		Promotion *int   `json:"promotion,omitempty"`
+	}{
+		From: move.From,
+		To:   move.To,
+	}
+	if move.Promotion != 0 {
+		promo := int(move.Promotion)
+		moveJSON.Promotion = &promo
+	}
+	data, err := json.Marshal(moveJSON)
+	if err != nil {
+		return js.ValueOf(nil)
+	}
+	return js.ValueOf(string(data))
+}
+
 func main() {
 	e := js.Global().Get("Object").New()
 	e.Set("validMovesChess", js.FuncOf(getValidMovesJS))
@@ -65,6 +108,8 @@ func main() {
 	e.Set("makeMove", js.FuncOf(makeMoveJS))
 	e.Set("isCheckJS", js.FuncOf(isCheckJS))
 	e.Set("gameStatus", js.FuncOf(gameStatusJS))
+	e.Set("aiMove", js.FuncOf(aiMoveJS))
+	e.Set("aiMoveDepth", js.FuncOf(aiMoveDepthJS))
 	js.Global().Set("goWasmEngine", e)
 	select {}
 }

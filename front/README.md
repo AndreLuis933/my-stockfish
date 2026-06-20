@@ -3,7 +3,7 @@
 React 19 + TypeScript (strict) + Vite (Bun) frontend for two board games:
 
 - **Damas Brasileiras** (Brazilian Checkers) — fully playable, AI in TypeScript
-- **Xadrez** (Chess) — playable, move generation and board state run in Go compiled to WebAssembly
+- **Xadrez** (Chess) — fully playable, including human-vs-AI; move generation and board state run in Go compiled to WebAssembly, AI runs in Go
 
 ---
 
@@ -19,6 +19,7 @@ React 19 + TypeScript (strict) + Vite (Bun) frontend for two board games:
 | Package manager | Bun |
 | Checkers AI | TypeScript — Minimax + Alpha-Beta + IDDFS (depth 8) |
 | Chess engine | Go 1.25 → WebAssembly (loaded via Web Worker) |
+| Chess AI | Go 1.25 → WebAssembly — negamax + alpha-beta + iterative deepening |
 
 ---
 
@@ -94,7 +95,7 @@ public/
 
 ## Go WASM integration
 
-The chess engine runs in Go compiled to WebAssembly, loaded inside a Web Worker to avoid blocking the UI thread.
+The chess engine and AI run in Go compiled to WebAssembly, loaded inside a Web Worker to avoid blocking the UI thread.
 
 ### Call flow
 
@@ -117,6 +118,8 @@ React component
 | `makeMove` | `number, number, number?` | `number[]` (64 bytes) | Apply a move; optional promotion byte |
 | `isCheckJS` | — | `number` | Checked king's square index, or -1 |
 | `gameStatus` | — | `string` | `"playing" \| "white-wins" \| "black-wins" \| "draw"` |
+| `aiMove` | `number` (time limit ms) | JSON string `{from, to, promotion?}` | AI best move via time-limited search |
+| `aiMoveDepth` | `number` (depth) | JSON string `{from, to, promotion?}` | AI best move via fixed-depth search |
 
 ### Vite plugin (`plugins/go-wasm.ts`)
 
@@ -141,6 +144,13 @@ Handles everything automatically in dev mode:
 - **Pawn promotion**: picker modal with Q/N/R/B using piece SVGs
 - **Board flip**: toggle board orientation
 - **Turn banner**: shows whose turn it is with colored dots
+- **AI setup panel** (human-vs-ai mode):
+  - **Color selector**: "Você joga de: Brancas / Pretas" — board auto-flips when human chooses black
+  - **Search mode**: difficulty / custom time (ms) / custom depth
+  - **Difficulty**: Fácil (100ms) / Médio (500ms) / Difícil (2000ms) — time-limited iterative deepening
+  - **Custom time**: number input (10-60000ms) — exact time budget for the AI
+  - **Custom depth**: number input (1-10) — fixed-depth search with no time limit
+- **"IA pensando..." indicator**: badge in turn banner while AI searches
 
 ## Damas (Checkers) features
 
@@ -166,5 +176,5 @@ Handles everything automatically in dev mode:
 ## See also
 
 - [`../README.md`](../README.md) — project overview
-- [`../go-wasm/README.md`](../go-wasm/README.md) — Go chess engine
+- [`../go-wasm/README.md`](../go-wasm/README.md) — Go chess engine + AI
 - [`../AGENTS.md`](../AGENTS.md) — full architecture, current state, contribution rules

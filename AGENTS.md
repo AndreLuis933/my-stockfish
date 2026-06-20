@@ -3,9 +3,9 @@
 Two board games in one React app:
 
 - **Damas Brasileiras** (Brazilian Checkers) — fully playable, AI runs in TypeScript
-- **Xadrez** (Chess) — playable, move generation and board state run in Go compiled to WebAssembly
+- **Xadrez** (Chess) — fully playable, including human-vs-AI; move generation and board state run in Go compiled to WebAssembly, AI runs in Go (separate `pkg/ai` package)
 
-The Go WASM integration is **live**: the worker loads the engine, the React hook calls it for valid moves and move application, and pawn promotion is wired end-to-end.
+The Go WASM integration is **live**: the worker loads the engine, the React hook calls it for valid moves and move application, pawn promotion is wired end-to-end, and the chess AI searches via `ai.Search()` exposed as `aiMove` / `aiMoveDepth`.
 
 ---
 
@@ -35,8 +35,8 @@ my-stockfish/
 │       │   │   ├── Checkers.tsx
 │       │   │   └── Checkers.module.css
 │       │   └── chess/             # Route /chess
-│       │       ├── Chess.tsx              # Renders board, turn banner, promotion picker, "Xeque!" badge, result overlay
-│       │       ├── Chess.hooks.ts         # useChess: state machine bridging React ↔ Go WASM (checkSquare, result from engine.gameStatus())
+│       │       ├── Chess.tsx              # Renders board, turn banner, promotion picker, "Xeque!" badge, result overlay, AI setup panel
+│       │       ├── Chess.hooks.ts         # useChess: state machine bridging React ↔ Go WASM, AI turn effect, difficulty/time/depth search modes
 │       │       └── Chess.module.css
 │       ├── components/
 │       │   ├── Board/             # Checkers board UI (Board.tsx + Board.module.css)
@@ -55,31 +55,39 @@ my-stockfish/
 │       └── assets/                # Static images (hero, react/vite svg)
 ├── go-wasm/                        # Go source compiled to WASM (module: webassemble, go 1.25)
 │   ├── cmd/
-│   │   ├── wasm/main.go           # WASM entry: registers goWasmEngine.{validMovesChess, initBoard, makeMove, isCheckJS, gameStatus}
+│   │   ├── wasm/main.go           # WASM entry: registers goWasmEngine.{validMovesChess, initBoard, makeMove, isCheckJS, gameStatus, aiMove, aiMoveDepth}
 │   │   └── command/main.go        # CLI debug entry: loads FEN, runs Perft depths 1-5
 │   ├── pkg/
-│   │   ├── types/types.go         # Piece uint8 (type bits + color bits), CastlingRights uint8 (KQkq), Move struct (with Flag + Captured), MoveFlag enum, Piece methods
-│   │   └── engine/                # Chess logic (pure Go, no JS deps)
-│   │       ├── position.go        # Position struct (Board, WhiteToMove, CastlingRights, EnPassant*, HalfmoveClock, FullmoveNumber, undoStack) + Game global + reset()
-│   │       ├── helpers.go         # Pure helpers: abs, inBounds, oppositeColor, colorOfSide(); legacy free fns KingCheck()/Perft() delegating to Game
-│   │       ├── fen.go             # LoadFen(): parses all 6 FEN fields (pieces, turn, castling, en passant target, halfmove clock, fullmove number) + squareToIndex() + StartingFEN constant
-│   │       ├── print.go           # PrintBoard(): ASCII debug print
-│   │       ├── moves.go           # Position.PseudoLegalMoves(): iterate board, dispatch per piece type, filtered by turn
-│   │       ├── move_pawn.go       # Pawn moves: forward, double (FlagDoublePush), captures, en passant (FlagEnPassant), promotion (FlagPromotion, 4 moves)
-│   │       ├── move_knight.go     # Knight L-jumps with row/col diff validation
-│   │       ├── move_bishop.go     # Bishop diagonal slides
-│   │       ├── move_rook.go       # Rook orthogonal slides
-│   │       ├── move_king.go       # King one-step + castling (FlagCastleK/FlagCastleQ, with attack-path checks)
-│   │       ├── make.go            # Position.Make(move) + Position.Unmake(move): flagged make/unmake with undoStack (O(1) reversible), handles en passant/castling/promotion/clocks; legacy MakeMove(from,to,promo) bridge fn
-│   │       ├── attacks.go         # Position.FindKing, Position.IsSquareAttacked (reverse-scan), Position.IsInCheck
-│   │       ├── legal.go           # Position.LegalMoves(): pseudo-legal → Make/Unmake filter, drops moves leaving own king in check
-│   │       ├── status.go          # GameStatus enum + Position.CurrentStatus(): playing / white-wins / black-wins / draw (checkmate & stalemate)
-│   │       ├── perft.go           # Position.Perft(depth): recursive node count using Make/Unmake
-│   │       ├── legal_test.go      # Tests: FEN loading, castling rights, legal move counts, pins, en-passant discovered check, king-in-check
-│   │       ├── fen_test.go        # Tests: en passant target parsing, halfmove clock, fullmove number, squareToIndex, Make/Unmake clock management
-│   │       ├── status_test.go     # Tests: CurrentStatus (playing, fool's mate, stalemate, back-rank mate), GameStatus.String/IsGameOver, statusFor
-│   │       └── perft_test.go      # Tests: Perft on all 6 chessprogramming.org standard positions (initial, Kiwipete, Pos3-6)
-│   ├── tools/main.go              # Type generator: Go AST + type-checker → wasm-contract.ts
+│   │   ├── types/types.go         # Piece uint8 (type bits + color bits), CastlingRights uint8 (KQkq), Move struct (with Flag + Captured), MoveFlag enum, Piece methods (IsWhite, IsBlack, IsEnemy, Color, TypePiece)
+│   │   ├── engine/                # Chess rules (pure Go, no JS deps)
+│   │   │   ├── position.go        # Position struct (Board, WhiteToMove, CastlingRights, EnPassant*, HalfmoveClock, FullmoveNumber, undoStack) + Game global + reset()
+│   │   │   ├── helpers.go         # Pure helpers: abs, inBounds, oppositeColor, colorOfSide(); legacy free fns KingCheck()/Perft() delegating to Game
+│   │   │   ├── fen.go             # LoadFen(): parses all 6 FEN fields + squareToIndex() + StartingFEN constant
+│   │   │   ├── print.go           # PrintBoard(): ASCII debug print
+│   │   │   ├── moves.go           # Position.PseudoLegalMoves(ml *MoveList): iterate board, dispatch per piece type, writes into caller-owned MoveList
+│   │   │   ├── movelist.go        # MoveList struct: [256]Move inline array + count, methods (Add, Len, Get, Clear, Slice) — stack-allocatable, zero-alloc in hot paths
+│   │   │   ├── move_pawn.go       # Pawn moves: forward, double, captures, en passant, promotion; inline capture loop with IsEnemy guard
+│   │   │   ├── move_knight.go     # Knight L-jumps with IsEnemy guard
+│   │   │   ├── move_bishop.go     # Bishop diagonal slides with IsEnemy guard
+│   │   │   ├── move_rook.go       # Rook orthogonal slides with IsEnemy guard
+│   │   │   ├── move_king.go       # King one-step + delegates castling to generateCastling()
+│   │   │   ├── castling.go        # castleSide struct + castleSides [4]castleSide table + generateCastling(): data-driven, all 6 FIDE conditions as sequential guards with comments
+│   │   │   ├── make.go            # Position.Make(move) + Position.Unmake(move): flagged make/unmake with undoStack (O(1) reversible); legacy MakeMove(from,to,promo) bridge fn
+│   │   │   ├── attacks.go         # Position.FindKing, Position.IsSquareAttacked (reverse-scan), Position.IsInCheck
+│   │   │   ├── legal.go           # Position.LegalMoves(ml *MoveList): pseudo-legal → Make/Unmake filter; LegalMovesSlice() convenience wrapper for WASM bridge
+│   │   │   ├── status.go          # GameStatus enum + Position.CurrentStatus(): playing / white-wins / black-wins / draw; statusFor takes moveCount int
+│   │   │   ├── perft.go           # Position.Perft(depth): recursive node count using Make/Unmake + stack-allocated MoveList per ply
+│   │   │   ├── legal_test.go      # Tests: FEN loading, castling rights, legal move counts, pins, en-passant discovered check, king-in-check
+│   │   │   ├── fen_test.go        # Tests: en passant target parsing, halfmove clock, fullmove number, squareToIndex, Make/Unmake clock management
+│   │   │   ├── status_test.go     # Tests: CurrentStatus, GameStatus.String/IsGameOver, statusFor
+│   │   │   └── perft_test.go      # Tests: Perft on all 6 chessprogramming.org standard positions
+│   │   └── ai/                    # Chess AI (pure Go, no JS deps except build-tagged clock)
+│   │       ├── ai.go              # Evaluate(p *Position): material values + 6 piece-square tables (64 squares each)
+│   │       ├── search.go          # Search(p, timeLimitMs) + SearchFixedDepth(p, depth): negamax + alpha-beta + iterative deepening; uses PseudoLegalMoves + lazy IsInCheck
+│   │       ├── clock_wasm.go      # nowMs() via js.performance.now() — build tag: js && wasm
+│   │       ├── clock_native.go    # nowMs() via time.Now().UnixMilli() — build tag: !(js && wasm)
+│   │       └── ai_test.go         # Tests: evaluation, mate-in-1, mate-in-1-black, win hanging piece, search properties, depth scaling, NPS measurement, benchmarks
+│   ├── tools/main.go              # Type generator: Go AST + type-checker → wasm-contract.ts (optional, starting point only)
 │   └── bin/gen-types.exe          # Compiled type generator binary
 ├── AGENTS.md                       # This file
 ├── CLAUDE.md                       # Symlink/global coding preferences
@@ -99,36 +107,51 @@ my-stockfish/
 - Board flip, piece counters, "IA pensando..." indicator, must-move highlighting
 
 **Xadrez (Chess)**
-- Game runs in the browser via Go WASM: human-vs-human (human-vs-ai mode exists but AI is not yet implemented for chess)
-- Go engine handles: board representation, FEN loading (all 6 fields: pieces, turn, castling, en passant target, halfmove clock, fullmove number), move generation for all piece types, captures, en passant, pawn promotion, **castling**
-- **Position struct**: all game state is encapsulated in `Position` (Board, WhiteToMove, CastlingRights, EnPassantTarget/Capture, HalfmoveClock, FullmoveNumber, undoStack); a global `Game *Position` is used by the WASM bridge, the AI will create its own instances for parallel search
+- Game runs in the browser via Go WASM: human-vs-human and **human-vs-AI** (AI plays either color)
+- **Chess AI** (`pkg/ai`): negamax + alpha-beta + iterative deepening in Go; material + piece-square table evaluation; captures-first move ordering; time-limited or fixed-depth search
+- Go engine handles: board representation, FEN loading (all 6 fields), move generation for all piece types, captures, en passant, pawn promotion, **castling**
+- **Position struct**: all game state is encapsulated in `Position` (Board, WhiteToMove, CastlingRights, EnPassantTarget/Capture, HalfmoveClock, FullmoveNumber, undoStack); a global `Game *Position` is used by the WASM bridge; the AI uses the same Position via `Make`/`Unmake`
+- **MoveList**: fixed `[256]Move` inline array + count, passed as `*MoveList` to move generators — stack-allocated, zero heap allocation in hot paths (perft, legal moves, AI search)
 - **Flagged moves**: `Move` carries a `MoveFlag` (Normal | DoublePush | EnPassant | CastleK | CastleQ | Promotion) and a `Captured` piece — internal-only fields (`json:"-"`) so the frontend contract stays `{from, to, promotion?}`
 - **Make/Unmake**: `Position.Make(move)` applies a move incrementally and pushes undo info onto a stack; `Position.Unmake(move)` reverses it in O(1) — no full board copy, the performance foundation for AI search
-- **Castling**: implemented in Go — kingside & queenside for both colors; all 6 FIDE conditions checked (rights, empty path, king not in check, king path not attacked, king destination not attacked); rook moves with the king on `Make`; castling rights cleared on king/rook moves and rook captures
+- **Castling**: data-driven via `castleSides [4]castleSide` table in `castling.go`; all 6 FIDE conditions checked as sequential guards with comments; rook moves with the king on `Make`; castling rights cleared on king/rook moves and rook captures
+- **Piece.IsEnemy()**: unified enemy detection (`other&ColorMask != ColorNone && p&ColorMask != other&ColorMask`) — replaces duplicated color-branch logic in all move generators; correctly rejects empty squares
 - **Legal move filtering**: pseudo-legal moves are filtered by Make/Unmake — pins, en-passant discovered checks, and king-moves-into-check are all handled automatically
-- **Check detection**: `Position.IsSquareAttacked` (reverse-scan from a square) + `Position.IsInCheck` (king square attacked) + `KingCheck()` exposed to the frontend as `isCheckJS` → returns the checked king's square index or -1
-- **Game status**: `Position.CurrentStatus()` returns `playing | white-wins | black-wins | draw` (checkmate = no legal moves + in check, stalemate = no legal moves + not in check), exposed as `gameStatus`
-- **Perft validation**: `Position.Perft()` runs recursive move enumeration using Make/Unmake; validated against all 6 standard positions from chessprogramming.org/Perft_Results (initial position through depth 5 = 4,865,609 nodes; Kiwipete; Positions 3-6)
-- Pawn promotion: when a pawn reaches the last rank, a `PromotionPicker` modal lets the user choose Q/N/R/B; the chosen piece byte is sent to `engine.makeMove(from, to, promotionByte)`
-- Move validation: clicking a piece queries `engine.validMovesChess()` (JSON of `{from, to, promotion?}[]`), highlights legal targets
-- **Check highlight**: when `isCheckJS` returns a square, the king's square glows red (pulsing animation) and a "Xeque!" badge appears in the turn banner
-- **Result overlay**: "Brancas vencem!" / "Pretas vencem!" / "Empate!" shown when `gameStatus` returns a terminal status
+- **Check detection**: `Position.IsSquareAttacked` (reverse-scan from a square) + `Position.IsInCheck` (king square attacked) + `KingCheck()` exposed to the frontend as `isCheckJS`
+- **Game status**: `Position.CurrentStatus()` returns `playing | white-wins | black-wins | draw`, exposed as `gameStatus`
+- **Perft validation**: `Position.Perft()` runs recursive move enumeration using Make/Unmake + stack-allocated MoveList; validated against all 6 standard positions from chessprogramming.org/Perft_Results
+- Pawn promotion: `PromotionPicker` modal lets the user choose Q/N/R/B; the AI returns promotion bytes automatically
+- Move validation: clicking a piece queries `engine.validMovesChess()`, highlights legal targets
+- **Check highlight**: king's square glows red + "Xeque!" badge in turn banner
+- **Result overlay**: "Brancas vencem!" / "Pretas vencem!" / "Empate!"
+- **AI setup panel**: user chooses their color (board auto-flips), search mode (difficulty / custom time / custom depth), and difficulty level (Fácil/Médio/Difícil)
+- **"IA pensando..." indicator**: badge in turn banner while AI searches
 - Board flip, turn banner, result overlay
+
+**AI architecture**
+- **Separate `pkg/ai` package**: imports `pkg/engine` + `pkg/types`, clean one-directional dependency; engine doesn't know AI exists
+- **Stateless `Search(p *Position, timeLimitMs int) SearchResult`**: matches the checkers AI pattern; `SearchFixedDepth(p, depth)` for benchmarking
+- **Negamax** (not minimax with isMaximizing): negation handles perspective switching — simpler code
+- **Pseudo-legal moves + lazy `IsInCheck`**: one Make/Unmake per move (not two like LegalMoves would force); the AI uses `PseudoLegalMoves` directly, skipping `LegalMoves`
+- **Captures-first move ordering**: same as checkers; can upgrade to MVV-LVA later
+- **Build-tagged clock**: `clock_wasm.go` (JS `performance.now()`) and `clock_native.go` (Go `time.Now()`) — `pkg/ai` compiles and tests natively with `go test ./pkg/ai/`, no WASM needed
+- **Escape analysis verified**: `MoveList` stays on stack in perft, legal moves, AI search; only `LegalMovesSlice` (WASM bridge, cold path) allocates
 
 **WASM infrastructure**
 - `worker.js` exists and works: loads `wasm_exec.js` + `engine.wasm`, instantiates `goWasmEngine`, dispatches `{ id, fn, args }` messages, replies `{ id, result, error }`
 - `WasmWorkerEngine` (`loader.ts`): typed async wrappers over the Web Worker, pending-promise map, restart support
 - `useWasm` hook: loads engine, exposes `{ engine, loading, error, restarting }`, listens for `wasm-rebuild` HMR events and restarts the worker without a full page reload
 - Vite plugin (`plugins/go-wasm.ts`): compiles `engine.wasm` on dev start and prod build, copies `wasm_exec.js` from GOROOT, watches all `.go` files and rebuilds on change, sends `wasm-rebuild` HMR event
-- Type generator (`tools/main.go`): reads Go AST + type-checks `pkg/engine` → writes `wasm-contract.ts`
 
 ### What is missing / in progress
 
 | Piece | Notes |
 |---|---|
-| Chess AI | No minimax/alpha-beta in Go yet. `human-vs-ai` mode is defined but black doesn't move automatically in chess. `CurrentStatus()` is ready for the AI to detect terminal nodes. |
-| Type generator auto-run | The Vite plugin does **not** run the type generator automatically — it only builds the WASM and sends HMR. `wasm-contract.ts` is maintained by hand; run `gen-types.exe` only if you want to regenerate a starting point. |
-| Optional arg in contract | The generator emits all params as required. `makeMove`'s 3rd arg (`promotion`) was manually marked optional (`number?`) in `wasm-contract.ts`. Re-apply optionality if you regenerate. |
+| Transposition tables | No Zobrist hashing + TT cache yet — would need a `Searcher` struct with state |
+| Quiescence search | No capture-only extension past depth 0 yet — improves tactical accuracy |
+| Opening book | No opening repertoire — AI plays from first principles every game |
+| Type generator auto-run | The Vite plugin does **not** run the type generator — it only builds the WASM and sends HMR. `wasm-contract.ts` is maintained by hand. |
+| Optional arg in contract | The generator emits all params as required. `makeMove`'s 3rd arg (`promotion`) was manually marked optional in `wasm-contract.ts`. |
 | Checkers → Go | Checkers logic stays in TypeScript for now; no plan to port it to Go. |
 
 ---
@@ -151,11 +174,13 @@ React component
 
 | JS name | Go bridge | Pure function | Args | Return |
 |---|---|---|---|---|
-| `validMovesChess` | `getValidMovesJS` | `engine.Game.LegalMoves()` | — | JSON string of `Move[]` |
+| `validMovesChess` | `getValidMovesJS` | `engine.Game.LegalMovesSlice()` | — | JSON string of `Move[]` |
 | `initBoard` | `initBoardJs` | `engine.LoadFen(engine.StartingFEN)` | — | `number[]` (64 board bytes) |
 | `makeMove` | `makeMoveJS` | `engine.MakeMove(from, to, promotion)` | `number, number, number?` | `number[]` (64 board bytes) |
 | `isCheckJS` | `isCheckJS` | `engine.KingCheck()` | — | `number` (checked king's square index, or -1) |
 | `gameStatus` | `gameStatusJS` | `engine.CurrentStatus().String()` | — | `string` (`"playing"` \| `"white-wins"` \| `"black-wins"` \| `"draw"`) |
+| `aiMove` | `aiMoveJS` | `ai.Search(engine.Game, timeLimitMs)` | `number` (time limit ms) | JSON string `{from, to, promotion?}` |
+| `aiMoveDepth` | `aiMoveDepthJS` | `ai.SearchFixedDepth(engine.Game, depth)` | `number` (depth) | JSON string `{from, to, promotion?}` |
 
 ### Piece byte encoding (shared between Go and TS)
 
@@ -166,7 +191,7 @@ bits 6-7: color
   00=empty, 01=white (0b01000000), 10=black (0b10000000)
 ```
 
-`Move.Promotion` is a `Piece` (color bits | type bits, value type not pointer) — `omitempty` in JSON means it's omitted when 0 (no promotion). The Go engine emits 4 separate moves per promotable pawn push (Q, N, B, R), each with a different `Promotion` byte. The frontend collects these into a `PendingPromotion` and shows the picker. `Move.Flag` and `Move.Captured` are internal-only (`json:"-"`).
+`Move.Promotion` is a `Piece` (color bits | type bits) — `omitempty` in JSON means it's omitted when 0 (no promotion). The Go engine emits 4 separate moves per promotable pawn push (Q, N, B, R), each with a different `Promotion` byte. `Move.Flag` and `Move.Captured` are internal-only (`json:"-"`).
 
 ### Castling rights encoding
 
@@ -178,26 +203,40 @@ CastlingRights uint8 bitmask:
   bit 3: CastleBlackQ  (black queenside, e8→c8,  rook a8→d8)
 ```
 
-Parsed from FEN field 2 (`KQkq` or `-`) by `LoadFen`. Castling generation is implemented in `move_king.go` (kingside & queenside for both colors); rights are cleared in `MakeMove` on king moves, rook moves from corners, and rook captures on corners.
+Parsed from FEN field 2 (`KQkq` or `-`) by `LoadFen`. Castling generation is data-driven via the `castleSides` table in `castling.go`; rights are cleared in `MakeMove` on king moves, rook moves from corners, and rook captures on corners.
+
+### AI search architecture
+
+```
+cmd/wasm/main.go
+    ↓ imports
+pkg/ai              ← Search(), SearchFixedDepth(), Evaluate()
+    ↓ imports
+pkg/engine           ← Position, MoveList, Make/Unmake, PseudoLegalMoves, IsInCheck, CurrentStatus
+    ↓ imports
+pkg/types            ← Move, Piece, constants
+```
+
+The AI uses `PseudoLegalMoves` + lazy `IsInCheck` (one Make/Unmake per move, not two). Move ordering is captures-first. The clock is build-tagged: `clock_wasm.go` uses `js.performance.now()`, `clock_native.go` uses `time.Now()`. The `pkg/ai` package compiles and tests natively with `go test ./pkg/ai/` — no WASM needed for development.
 
 ### Type safety pipeline
 
 ```
-go-wasm/pkg/engine/*.go + pkg/types/types.go   (real Go types)
+go-wasm/pkg/engine/*.go + pkg/ai/*.go + pkg/types/types.go   (real Go types)
   ↓  tools/main.go (type generator — optional, for a starting point only)
 front/src/wasm/generated/wasm-contract.ts       (hand-maintained TS contract)
   ↓  imported by
 front/src/wasm/loader.ts                        (WasmWorkerEngine: typed async wrappers)
 ```
 
-`wasm-contract.ts` is hand-maintained — edit it directly when Go function signatures change. The type generator (`tools/main.go`) is only a starting point; it does not run automatically and the generated output must be hand-edited (e.g. to mark optional params) before use.
+`wasm-contract.ts` is hand-maintained — edit it directly when Go function signatures change.
 
 ### How to add a new Go function
 
-1. Add the pure function to a file in `pkg/engine/` (or `pkg/types/`)
+1. Add the pure function to a file in `pkg/engine/` or `pkg/ai/` (or `pkg/types/`)
 2. Add a bridge wrapper to `cmd/wasm/main.go` and register it with `e.Set("jsName", js.FuncOf(bridgeFunc))`
 3. Save — the Vite plugin rebuilds `engine.wasm` automatically and sends the HMR event
-4. **Manually** update `wasm-contract.ts` to reflect the new/changed function signature (edit the file directly; run `gen-types.exe` only if you want a regenerated starting point)
+4. **Manually** update `wasm-contract.ts` to reflect the new/changed function signature
 5. Add the typed wrapper to `WasmWorkerEngine` in `loader.ts`: `newFn = this.fn("jsName")`
 6. `worker.js` needs no changes — it dispatches generically by function name
 
@@ -212,15 +251,19 @@ bun run check     # tsc -b && eslint:strict  (run after every change)
 bun test          # vitest
 bun run build     # tsc -b && vite build (also builds WASM with prod flags)
 
-# Go WASM (from go-wasm/)
-GOOS=js GOARCH=wasm go build -o ../front/public/wasm/engine.wasm ./cmd/wasm
+# Go engine (from go-wasm/)
+go test ./pkg/engine/ -v          # engine tests (native, no WASM)
+go test ./pkg/ai/ -v -short       # AI tests (native, no WASM) — fast mode
+go test ./pkg/ai/ -v              # AI tests including depth scaling + NPS measurement
+go test ./pkg/ai/ -bench=.        # AI benchmarks (nodes/sec, eval speed)
+go run ./cmd/command              # CLI debug: loads FEN, runs Perft depths 1-5
+
+# Go WASM build (from go-wasm/)
+$env:GOOS="js"; $env:GOARCH="wasm"; go build -o ../front/public/wasm/engine.wasm ./cmd/wasm
 
 # Type generator (from go-wasm/) — optional, for a starting point only
 go build -o bin/gen-types.exe tools/main.go
 ./bin/gen-types.exe
-
-# CLI debug (from go-wasm/) — loads standard FEN, prints valid moves
-go run ./cmd/command
 ```
 
 PowerShell WASM build (Windows):
@@ -233,10 +276,12 @@ $env:GOOS="js"; $env:GOARCH="wasm"; go build -o ../front/public/wasm/engine.wasm
 ## Rules
 
 - Run `bun run check` from `front/` after every file change.
-- `wasm-contract.ts` is hand-maintained — edit it directly when Go function signatures change. Never run `gen-types.exe` as part of the normal workflow; it is only a starting point and its output must be hand-edited (e.g. to mark optional params) before use.
+- Run `go test ./pkg/engine/ ./pkg/ai/` from `go-wasm/` after Go changes.
+- `wasm-contract.ts` is hand-maintained — edit it directly when Go function signatures change. Never run `gen-types.exe` as part of the normal workflow.
 - The Vite plugin **only** builds the WASM and sends HMR events — it does **not** run the type generator.
 - `worker.js` must be plain JavaScript (no bundler) — it runs inside a Web Worker with no import support unless using `importScripts`.
 - `wasm_exec.js` is copied from `GOROOT/lib/wasm/wasm_exec.js` by the Vite plugin on build — do not edit it.
+- `pkg/ai` has no `//go:build js && wasm` tag on its core files — only `clock_wasm.go` and `clock_native.go` are build-tagged. The AI package compiles and tests natively.
 - All user-facing text is in Portuguese (pt-BR). All code (variables, functions, files) is in English.
 
 ## Documentation — update rule
@@ -247,6 +292,6 @@ $env:GOOS="js"; $env:GOARCH="wasm"; go build -o ../front/public/wasm/engine.wasm
   1. **`AGENTS.md`** (root) — project state, architecture, repository layout, registered functions, encoding, rules
   2. **`README.md`** (root) — project overview, stack, getting started, current state summary
   3. **`front/README.md`** — frontend structure, WASM integration, UI features, registered JS functions
-  4. **`go-wasm/README.md`** — engine structure, piece/castling encoding, perft validation, JS bridge table
+  4. **`go-wasm/README.md`** — engine structure, piece/castling encoding, perft validation, JS bridge table, AI package
 
 Update each file's relevant section based on what changed (new files, new functions, new features, changed architecture, test results, etc.). Do not skip any of the four files on an "all" update — they are the canonical documentation set.
