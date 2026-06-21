@@ -56,11 +56,16 @@ func orderMoves(ml *engine.MoveList, previousBest *types.Move) {
 }
 
 // noLegalMoveScore returns the terminal score when the side to move has no legal
-// moves: checkmate (negative, scaled by depth so closer mates are preferred)
-// or stalemate (draw, score 0).
-func noLegalMoveScore(inCheck bool, depth int) int {
+// moves: checkmate (negative, scaled by ply so closer mates are preferred) or
+// stalemate (draw, score 0).
+//
+// Uses ply (distance from root) not depth: a mate found at ply N is scored
+// -winScore + N, so mates closer to the root (smaller N) have higher scores
+// and are preferred. Using depth would be wrong because the check extension
+// modifies depth, and depth doesn't reflect the actual distance from root.
+func noLegalMoveScore(inCheck bool, ply int) int {
 	if inCheck {
-		return -winScore + depth
+		return -winScore + ply
 	}
 	return 0
 }

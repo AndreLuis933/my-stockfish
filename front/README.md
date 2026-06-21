@@ -19,7 +19,7 @@ React 19 + TypeScript (strict) + Vite (Bun) frontend for two board games:
 | Package manager | Bun |
 | Checkers AI | TypeScript — Minimax + Alpha-Beta + IDDFS (depth 8) |
 | Chess engine | Go 1.25 → WebAssembly (loaded via Web Worker) |
-| Chess AI | Go 1.25 → WebAssembly — negamax + alpha-beta + iterative deepening |
+| Chess AI | Go 1.25 → WebAssembly — negamax + alpha-beta + iterative deepening + transposition table + quiescence search |
 
 ---
 

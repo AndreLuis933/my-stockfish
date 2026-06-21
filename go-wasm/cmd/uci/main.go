@@ -24,17 +24,17 @@ const (
 // communicates only via channels.
 type uciSession struct {
 	pos engine.Position
+	tt  *engine.TranspositionTable
 
-	// searchMu guards the search goroutine: only one search may run at
-	// a time. A new "go" must wait for the previous search to finish (or
-	// be stopped) before starting.
 	searchMu   sync.Mutex
 	stopCh     chan struct{}
 	searchDone chan struct{}
 }
 
 func newSession() *uciSession {
-	s := &uciSession{}
+	s := &uciSession{
+		tt: engine.DefaultTranspositionTable(),
+	}
 	s.pos.LoadFen(engine.StartingFEN)
 	return s
 }
@@ -163,6 +163,7 @@ func (s *uciSession) handleIsready() {
 func (s *uciSession) handleUcinewgame() {
 	s.stopSearch()
 	s.pos.LoadFen(engine.StartingFEN)
+	s.tt.Clear()
 }
 
 // handlePosition parses "position [startpos | fen <FEN>] [moves ...]".
@@ -333,9 +334,9 @@ func (s *uciSession) handleGo(parts []string) {
 		}()
 		var result ai.SearchResult
 		if gp.depth > 0 {
-			result = ai.SearchFixedDepth(&searchPos, gp.depth, stopCh)
+			result = ai.SearchFixedDepthWithTT(&searchPos, gp.depth, stopCh, s.tt)
 		} else {
-			result = ai.Search(&searchPos, int(timeMs), stopCh)
+			result = ai.SearchWithTT(&searchPos, int(timeMs), stopCh, s.tt)
 		}
 		printInfo(result)
 

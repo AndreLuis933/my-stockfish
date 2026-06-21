@@ -48,18 +48,20 @@ func CurrentStatus() GameStatus {
 	return Game.CurrentStatus()
 }
 
-// CurrentStatus computes the status for this position. Checks for all draw
-// rules (50-move, threefold repetition, insufficient material), checkmate,
-// and stalemate.
+// CurrentStatus computes the status for this position. Checks for
+// checkmate/stalemate first (no legal moves), then draw rules (50-move,
+// threefold repetition, insufficient material). A checkmated position is
+// never a draw, even if the 50-move clock is high or the position repeated.
 func (p *Position) CurrentStatus() GameStatus {
-	// Draw rules that don't require move generation.
-	if p.IsDraw() {
-		return StatusDraw
-	}
-
 	color := p.colorOfSide()
 	var ml MoveList
 	p.LegalMoves(&ml)
 	inCheck := p.IsInCheck(color)
+	if ml.n == 0 {
+		return statusFor(color, ml.n, inCheck)
+	}
+	if p.IsDraw() {
+		return StatusDraw
+	}
 	return statusFor(color, ml.n, inCheck)
 }

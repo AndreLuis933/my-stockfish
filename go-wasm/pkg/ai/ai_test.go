@@ -88,6 +88,36 @@ func TestMateIn1Black(t *testing.T) {
 	}
 }
 
+// TestMateIn1WithHighHalfmoveClock reproduces a bug from a real game (pgn.txt):
+// in a K+Q vs K endgame, the halfmove clock exceeded 100 and the engine
+// returned 0 (draw) at the root before detecting mate-in-1 was available.
+// Checkmate must be detected even when the 50-move rule clock is high.
+func TestMateIn1WithHighHalfmoveClock(t *testing.T) {
+	// White Ke6, Qg7; Black Ke8. Qg8# — king can't flee (all escapes
+	// covered by Ke6 and Qg8). Halfmove clock set to 120 (past 50-move rule).
+	result := searchBest(t, "4k3/6Q1/4K3/8/8/8/8/8 w - - 120 1", 2000)
+	if !isMate(result.Move) {
+		t.Errorf("expected checkmate with high halfmove clock, got move %d→%d",
+			result.Move.From, result.Move.To)
+	}
+}
+
+// TestMateIn1RepetitionInSearchTree reproduces the pgn.txt bug where the
+// engine failed to find mate-in-1 in a K+Q vs K endgame because the position
+// after the mating move had occurred 3× in the search path (threefold
+// repetition), causing IsRepetition() to return 0 (draw) before the move loop
+// could detect that the side to move had no legal moves (checkmate).
+func TestMateIn1RepetitionInSearchTree(t *testing.T) {
+	// White Kc3, Qb5; Black Ka1. Mate-in-1: Qb5-b2# (defended by Kc3, which
+	// is diagonally adjacent to b2). This is the exact position from move
+	// 120 of the pgn.txt game.
+	result := searchBest(t, "8/8/8/1Q6/8/2K5/8/k7 w - - 0 1", 2000)
+	if !isMate(result.Move) {
+		t.Errorf("expected Qb2# checkmate, got move %d→%d",
+			result.Move.From, result.Move.To)
+	}
+}
+
 func TestWinsHangingPiece(t *testing.T) {
 	// White knight on c5 is undefended; black to move should capture it with the bishop.
 	// After 1...Bxc5, black is up a knight (320 points).

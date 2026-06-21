@@ -36,7 +36,7 @@ Each subproject has its own README with detailed architecture and instructions:
 | Package manager | Bun (frontend) / Go modules (engine) |
 | Checkers AI | TypeScript — Minimax + Alpha-Beta + IDDFS (depth 8) |
 | Chess engine | Go 1.25 → WebAssembly (board state, move gen, castling, check/checkmate) |
-| Chess AI | Go 1.25 → WebAssembly — negamax + alpha-beta + iterative deepening (material + piece-square table eval) |
+| Chess AI | Go 1.25 → WebAssembly — negamax + alpha-beta + iterative deepening + transposition table + quiescence search (incremental material + piece-square table eval) |
 
 ---
 
@@ -91,13 +91,22 @@ go run ./cmd/command
 ### Xadrez (Chess) — fully playable
 
 - Game runs in the browser via Go WASM: **human-vs-human**, **human-vs-AI** (AI plays either color), and **AI-vs-AI** (both sides played by the engine)
-- **Chess AI** (`pkg/ai`): negamax + alpha-beta + iterative deepening in Go; material + piece-square table evaluation; captures-first move ordering; time-limited or fixed-depth search
+- **Standalone UCI engine** (`cmd/uci`): supports cutechess-cli for automated testing; persistent TT (cleared on `ucinewgame`), panic recovery, fallback legal move, `go depth`/`go wtime`/`go movetime`/`go infinite`, `stop`, `quit`, `position startpos|fen moves ...`
+- **Chess AI** (`pkg/ai`): negamax + alpha-beta + iterative deepening + **transposition table** + **quiescence search** in Go; material + piece-square table evaluation (incremental, O(1)); MVV move ordering; time-limited or fixed-depth search; ~7M nodes/sec native
 - Go engine handles: board representation, FEN loading (all 6 fields), move generation for all piece types, captures, en passant, pawn promotion, **castling**
-- **Castling**: data-driven via `castleSides [4]castleSide` table; all 6 FIDE conditions checked; rook moves with the king; castling rights cleared on king/rook moves and rook captures
-- **MoveList**: fixed `[256]Move` inline array + count, passed as `*MoveList` — stack-allocated, zero heap allocation in hot paths (perft, legal moves, AI search)
+- **Position struct**: all game state in `Position` (Board, WhiteToMove, CastlingRights, EnPassant*, HalfmoveClock, FullmoveNumber, Hash, KingSquares, EvalScore, undoStack[maxPly], undoPly); a global `Game *Position` is used by the WASM bridge; the AI uses the same Position via `Make`/`Unmake`
+- **Zobrist hashing**: `[12][64]uint64` piece keys + side + castling + EP keys (fixed seed); `Hash` maintained incrementally in `Make`/`Unmake` via XOR; `ComputeHash()` for initial computation in `LoadFen`
+- **Transposition table**: 4MB default (256K entries × 16 bytes); `TTEntry{key, score int16, depth, flag, move uint16}`; always-replace strategy; `Probe`/`Store`/`Clear`/`FillPercent`; mate score ply adjustment (`scoreToTT`/`scoreFromTT`); TT move used for move ordering
+- **Incremental evaluation**: `EvalScore` (white material+PST minus black) maintained in `Make`/`Unmake`; `Evaluate()` is O(1) — single field read + side-to-move negation; PST tables moved to `pkg/engine/evaluate.go` for `Make` to access
+- **King square cache**: `KingSquares[2]` in Position, updated in `Make`/`Unmake`; `FindKing` is O(1) array read instead of 64-square scan
+- **Fixed undo stack**: `undoStack [maxPly]undoInfo` (256 entries, ~12KB) + `undoPly int`; zero heap allocation in search; `Ply()` method exposes ply for TT mate-score adjustment
+- **Quiescence search**: `quiescence()` — stand-pat + captures-only extension past depth 0; prevents horizon effect (AI no longer thinks a hanging queen is safe); uses `PseudoLegalCaptures()` (capture-only move gen); repetition + 50-move draw checks
+- **Draw rules**: `CurrentStatus()` checks `IsDraw()` (50-move rule, threefold repetition, insufficient material); `negamax` checks `IsRepetition()` + `HalfmoveClock >= 100` at every node; `IsInsufficientMaterial()` (zero-alloc: K vs K, K+B vs K, K+N vs K, K+B vs K+B same color) checked in `CurrentStatus` only (too expensive per-node in search)
+- **MoveList**: fixed `[256]Move` inline array + count, passed as `*MoveList` — stack-allocated, zero heap allocation in hot paths (perft, legal moves, AI search, quiescence)
 - **Make/Unmake**: O(1) incremental make/unmake with undo stack — the performance foundation for AI search
+- **Castling**: data-driven via `castleSides [4]castleSide` table; all 6 FIDE conditions checked; rook moves with the king; castling rights cleared on king/rook moves and rook captures
 - **Piece.IsEnemy()**: unified enemy detection in all move generators — correctly rejects empty squares, replaces duplicated color-branch logic
-- **Check detection & game status**: checkmate, stalemate, and draw detection; king square glows red when in check; "Xeque!" badge; result overlay ("Brancas vencem!" / "Pretas vencem!" / "Empate!")
+- **Check detection & game status**: checkmate, stalemate, and draw detection (50-move, threefold repetition, insufficient material); king square glows red when in check; "Xeque!" badge; result overlay ("Brancas vencem!" / "Pretas vencem!" / "Empate!")
 - **Perft validation**: all 6 standard positions from chessprogramming.org pass (initial position through depth 5 = 4,865,609 nodes; Kiwipete; Positions 3-6)
 - Pawn promotion: picker modal (Q/N/R/B) wired end-to-end
 - **AI setup panel**: user chooses their color (board auto-flips), search mode (difficulty / custom time / custom depth), and difficulty level (Fácil/Médio/Difícil)
@@ -114,9 +123,13 @@ go run ./cmd/command
 
 ### What is missing
 
-- **Transposition tables**: no Zobrist hashing + TT cache yet
-- **Quiescence search**: no capture-only extension past depth 0 yet
+- **Killer moves + history heuristic**: no killer move slots yet — would improve quiet move ordering; next priority per ROADMAP.md
+- **Null move pruning**: no "pass and search at reduced depth" yet — 20-40% node reduction
+- **Late move reductions (LMR)**: no depth reduction for late moves yet — 20-40% in midgame; needs killers + history first
+- **Aspiration windows**: root searches with full window `[-inf, +inf]` — narrow windows would prune more
 - **Opening book**: no opening repertoire — AI plays from first principles every game
+- **Bitboards**: board is `[64]Piece` mailbox — bitboards + magic bitboards would give 10-50× raw speed; full engine rewrite
+- **Parallel search**: no goroutine-based parallel search yet — needs thread-safe TT
 - **Type generator auto-run**: the Vite plugin does not run the type generator; `wasm-contract.ts` is hand-maintained
 
 See `AGENTS.md` for the full architecture, call flow, encoding details, and contribution rules.

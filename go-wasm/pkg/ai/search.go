@@ -65,15 +65,9 @@ func negamax(p *engine.Position, depth, alpha, beta int, ctx *searchCtx, previou
 		return 0, types.Move{}
 	}
 
-	if p.HalfmoveClock >= 100 {
-		return 0, types.Move{}
-	}
-
-	// Repetition: threefold repetition is a draw. Cheap check — scans the
-	// undo stack hashes bounded by halfmove clock.
-	if p.IsRepetition() {
-		return 0, types.Move{}
-	}
+	// 50-move / repetition draws are checked after move generation below:
+	// checkmate/stalemate must be detected first, since a position can be
+	// both "HalfmoveClock >= 100" and checkmate, and checkmate wins.
 
 	// TT probe: if we have a usable entry, return its score. Even if the
 	// depth is insufficient, the stored move improves ordering.
@@ -106,16 +100,26 @@ func negamax(p *engine.Position, depth, alpha, beta int, ctx *searchCtx, previou
 		}
 	}
 
+	// Check extension at the leaf: when the side to move is in check at
+	// depth 0, search one more ply with full move generation instead of
+	// dropping into quiescence. Quiescence only searches captures and
+	// returns stand-pat eval — it cannot detect checkmate (no legal moves
+	// while in check). Without this extension, the engine misses mate-in-1
+	// at the depth horizon: Qb2# would score as a normal eval, not +winScore.
+	moverColor := sideColor(p)
+	inCheck := p.IsInCheck(moverColor)
 	if depth == 0 {
-		return Evaluate(p), types.Move{}
+		if inCheck {
+			depth = 1
+		} else {
+			return quiescence(p, alpha, beta, ctx), types.Move{}
+		}
 	}
 
 	var ml engine.MoveList
 	p.PseudoLegalMoves(&ml)
 	orderMoves(&ml, ttMove)
 
-	moverColor := sideColor(p)
-	inCheck := p.IsInCheck(moverColor)
 	best := negInf
 	bestMove := types.Move{}
 	initialAlpha := alpha
@@ -150,7 +154,19 @@ func negamax(p *engine.Position, depth, alpha, beta int, ctx *searchCtx, previou
 	}
 
 	if best == negInf {
-		return noLegalMoveScore(inCheck, depth), types.Move{}
+		return noLegalMoveScore(inCheck, ply), types.Move{}
+	}
+
+	// 50-move rule and threefold repetition are claimable draws: the side
+	// to move can claim the draw (score 0), but only if it's better than
+	// their best move. If checkmate is available (best > 0), the side plays
+	// on and wins. If all moves are worse than a draw, the side claims it.
+	// This is checked after the move loop so mate/stalemate (no legal moves)
+	// is detected first — noLegalMoveScore handles those.
+	if p.HalfmoveClock >= 100 || p.IsRepetition() {
+		if best < 0 {
+			best = 0
+		}
 	}
 
 	// TT store: save the result with the appropriate bound flag.
