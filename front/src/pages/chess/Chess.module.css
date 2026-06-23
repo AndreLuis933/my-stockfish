@@ -411,6 +411,129 @@
   color: #e0d8f0;
 }
 
+/* ── PGN modal ──────────────────────────────────────── */
+
+.pgnOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 8, 20, 0.82);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  padding: 20px;
+}
+
+.pgnModal {
+  background: #2a2640;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  padding: 24px;
+  width: 100%;
+  max-width: 560px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.7);
+}
+
+.pgnModalHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.pgnModalTitle {
+  font-size: 18px;
+  font-weight: 700;
+  color: #e0d8f0;
+}
+
+.pgnCloseBtn {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(224, 216, 240, 0.7);
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.pgnCloseBtn:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: #e0d8f0;
+}
+
+.pgnHint {
+  font-size: 13px;
+  color: rgba(224, 216, 240, 0.55);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.pgnTextarea {
+  width: 100%;
+  min-height: 180px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.05);
+  color: #e0d8f0;
+  font-family: "Courier New", monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 12px;
+  resize: vertical;
+  outline: none;
+  transition: border-color 150ms ease;
+  box-sizing: border-box;
+}
+
+.pgnTextarea:focus {
+  border-color: rgba(108, 92, 231, 0.6);
+}
+
+.pgnError {
+  font-size: 13px;
+  color: #e63946;
+  font-weight: 500;
+}
+
+.pgnModalActions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.pgnLoadButton {
+  padding: 8px 24px;
+  border-radius: 999px;
+  border: none;
+  background: #6c5ce7;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 150ms ease, transform 100ms ease;
+}
+
+.pgnLoadButton:hover:not(:disabled) {
+  background: #7d6ff0;
+}
+
+.pgnLoadButton:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.pgnLoadButton:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 /* ── Responsive ──────────────────────────────────────── */
 
 @media (max-width: 920px) {

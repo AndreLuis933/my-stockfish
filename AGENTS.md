@@ -94,11 +94,11 @@ my-stockfish/
 │   │   │   └── draw_test.go       # Tests: threefold repetition, insufficient material (KvK, KBvK, KNvK, KBvsKB same/diff color), 50-move rule, CurrentStatus draw
 │   │   └── ai/                    # Chess AI (pure Go, no JS deps except build-tagged clock)
 │   │       ├── ai.go              # Evaluate(p *Position): O(1) read of incremental EvalScore (negated for side to move) — material + PST maintained by Make/Unmake
-│   │       ├── types.go           # SearchResult, searchCtx (with tt *TranspositionTable), constants (winScore=30000, negInf=-32000, nodeCheckMask, maxDepth), shouldStop() method
-│   │       ├── moveorder.go       # sideColor, moveOrderScore (previousBest + MVV via MaterialValue), orderMoves (insertion sort), noLegalMoveScore
-│   │       ├── search.go          # negamax (recursive core: TT probe + store, alpha-beta, mate score ply adjustment, repetition/50-move draw checks), scoreToTT/scoreFromTT
+│   │       ├── types.go           # SearchResult, searchCtx (with tt *TranspositionTable, killers killerTable, history historyTable, disableNullMove bool), constants (winScore=30000, negInf=-32000, nodeCheckMask, maxDepth=32, maxPly=256), shouldStop() method
+│   │       ├── moveorder.go       # sideColor, killerTable [maxPly][2]Move, historyTable [4096]int, moveOrderScore (previousBest + MVV + killers + history), orderMoves (insertion sort), noLegalMoveScore
+│   │       ├── search.go          # negamax (recursive core: TT probe + store, alpha-beta, null-move pruning, LMR, killer/history recording on cutoffs, mate score ply adjustment, repetition/50-move draw checks), scoreToTT/scoreFromTT, hasNonPawnMaterial
 │   │       ├── quiescence.go      # quiescence(): stand-pat + captures-only extension past depth 0 — prevents horizon effect
-│   │       ├── search_api.go      # Search() + SearchWithTT(), SearchFixedDepth() + SearchFixedDepthWithTT(), iterativeDeepening() — public entry points
+│   │       ├── search_api.go      # Search() + SearchWithTT(), SearchFixedDepth() + SearchFixedDepthWithTT(), iterativeDeepening (aspiration windows from depth 3, history aging) — public entry points
 │   │       ├── clock_wasm.go      # nowMs() via js.performance.now() — build tag: js && wasm
 │   │       ├── clock_native.go    # nowMs() via time.Now().UnixMilli() — build tag: !(js && wasm)
 │   │       └── ai_test.go         # Tests: evaluation, mate-in-1, mate-in-1-black, win hanging piece, search properties, depth scaling, NPS measurement, ID vs direct, benchmarks
@@ -128,7 +128,7 @@ my-stockfish/
 **Xadrez (Chess)**
 - Game runs in the browser via Go WASM: human-vs-human, **human-vs-AI** (AI plays either color), and **AI-vs-AI** (both sides played by the engine)
 - **Standalone UCI engine** (`cmd/uci`): supports cutechess-cli for automated testing; persistent TT (cleared on `ucinewgame`), panic recovery, fallback legal move, `go depth`/`go wtime`/`go movetime`/`go infinite`, `stop`, `quit`, `position startpos|fen moves ...`
-- **Chess AI** (`pkg/ai`): negamax + alpha-beta + iterative deepening + **transposition table** + **quiescence search** in Go; material + piece-square table evaluation (incremental); MVV move ordering; time-limited or fixed-depth search
+- **Chess AI** (`pkg/ai`): negamax + alpha-beta + iterative deepening + **transposition table** + **quiescence search** + **killer moves + history heuristic** + **null-move pruning** + **late move reductions (LMR)** + **aspiration windows** in Go; material + piece-square table evaluation (incremental); MVV + killers + history move ordering; time-limited or fixed-depth search; depth 12 at 1s on starting position
 - Go engine handles: board representation, FEN loading (all 6 fields), move generation for all piece types, captures, en passant, pawn promotion, **castling**
 - **Position struct**: all game state in `Position` (Board, WhiteToMove, CastlingRights, EnPassant*, HalfmoveClock, FullmoveNumber, Hash, KingSquares, EvalScore, undoStack[maxPly], undoPly); a global `Game *Position` is used by the WASM bridge; the AI uses the same Position via `Make`/`Unmake`
 - **Zobrist hashing**: `[12][64]uint64` piece keys + side + castling + EP keys (fixed seed); `Hash` maintained incrementally in `Make`/`Unmake` via XOR; `ComputeHash()` for initial computation in `LoadFen`
@@ -172,9 +172,12 @@ my-stockfish/
 - **Unified `negamax`**: single recursive function returns `(score, bestMove)` — no separate `searchRoot`; root passes `previousBest` for ordering, internal nodes pass `nil`
 - **Negamax** (not minimax with isMaximizing): negation handles perspective switching — simpler code
 - **Pseudo-legal moves + lazy `IsInCheck`**: one Make/Unmake per move (not two like LegalMoves would force); the AI uses `PseudoLegalMoves` directly, skipping `LegalMoves`
-- **MVV move ordering**: captures sorted by `MaterialValue(captured)`; previousBest (ID hint) / TT move forced to index 0; insertion sort (optimal for ~20-40 moves, faster than `sort.Slice` with closure overhead)
+- **MVV + killers + history move ordering**: captures sorted by `MaterialValue(captured)`; previousBest (ID hint) / TT move forced to index 0; killers (two `[maxPly][2]Move` slots per ply, quiet cutoff moves) at score 900; history (`[4096]int` indexed by `from*64+to`, depth² bonus + aging) for remaining quiet moves; insertion sort (optimal for ~20-40 moves, faster than `sort.Slice` with closure overhead)
 - **Quiescence search**: stand-pat + captures-only (`PseudoLegalCaptures`) at depth 0 — prevents horizon effect
 - **Transposition table**: Zobrist hash → 16-byte entry; always-replace; mate score ply adjustment; TT move for ordering
+- **Null-move pruning**: "pass" once, search opponent at `depth-1-R` (R=2); if still ≥ beta, prune the subtree; guarded by `!inCheck && ply > 0 && depth > 3 && hasNonPawnMaterial && !ctx.disableNullMove`; inline hash/side flip (no Make call — restores manually); `ZobristSideKey` / `ZobristEPKeys` exported from engine for the flip
+- **Late move reductions (LMR)**: after 3 full-depth moves, remaining quiet non-killer non-promotion moves searched at `depth-2`; if reduced search beats alpha, re-search at full depth; skips captures, promotions, killers (those need full accuracy)
+- **Aspiration windows**: from depth 3, search with `[score-50, score+50]` instead of `[-inf, +inf]`; on fail-low (score ≤ alpha) widen downward, on fail-high (score ≥ beta) widen upward, re-search (TT makes it cheap); history aged between iterations
 - **Iterative deepening**: depth 1, 2, 3... until time budget expires; previous depth's best move searched first (improves cutoffs); aborted partial results discarded; used by `Search` (time-limited) and `SearchFixedDepth` (fallback on abort)
 - **Build-tagged clock**: `clock_wasm.go` (JS `performance.now()`) and `clock_native.go` (Go `time.Now()`) — `pkg/ai` compiles and tests natively with `go test ./pkg/ai/`, no WASM needed
 - **Escape analysis verified**: `MoveList` stays on stack in perft, legal moves, AI search, quiescence; only `LegalMovesSlice` (WASM bridge, cold path) allocates
@@ -189,13 +192,9 @@ my-stockfish/
 
 | Piece | Notes |
 |---|---|
-| Killer moves + history heuristic | No killer move slots yet — would improve quiet move ordering; next priority per ROADMAP.md |
-| Null move pruning | No "pass and search at reduced depth" yet — 20-40% node reduction |
-| Late move reductions (LMR) | No depth reduction for late moves yet — 20-40% in midgame; needs killers + history first |
-| Aspiration windows | Root searches with full window `[-inf, +inf]` — narrow windows would prune more |
 | Opening book | No opening repertoire — AI plays from first principles every game |
-| Bitboards | Board is `[64]Piece` mailbox — bitboards + magic bitboards would give 10-50× raw speed; full engine rewrite |
-| Parallel search | No goroutine-based parallel search yet — needs thread-safe TT |
+| Bitboards | Board is `[64]Piece` mailbox — bitboards + magic bitboards would give 10-50× raw speed; full engine rewrite (Phase 3) |
+| Parallel search | No goroutine-based parallel search yet — needs thread-safe TT (Phase 4) |
 | Type generator auto-run | The Vite plugin does **not** run the type generator — it only builds the WASM and sends HMR. `wasm-contract.ts` is maintained by hand. |
 | Optional arg in contract | The generator emits all params as required. `makeMove`'s 3rd arg (`promotion`) was manually marked optional in `wasm-contract.ts`. |
 | Checkers → Go | Checkers logic stays in TypeScript for now; no plan to port it to Go. |
@@ -288,11 +287,11 @@ TranspositionTable:
 cmd/wasm/main.go / cmd/uci/main.go
     ↓ imports
 pkg/ai              ← Search(), SearchWithTT(), SearchFixedDepth(), SearchFixedDepthWithTT(), Evaluate()
-│   ├── search.go       negamax (recursive core: TT probe/store, alpha-beta, draw checks)
+│   ├── search.go       negamax (recursive core: TT probe/store, alpha-beta, null-move pruning, LMR, killer/history recording, draw checks)
 │   ├── quiescence.go   quiescence (stand-pat + captures-only)
-│   ├── search_api.go   iterativeDeepening, public Search/SearchFixedDepth + WithTT variants
-│   ├── moveorder.go    MVV ordering, previousBest/TT-move-to-front
-│   ├── types.go        SearchResult, searchCtx (with tt), shouldStop()
+│   ├── search_api.go   iterativeDeepening (aspiration windows from depth 3, history aging), public Search/SearchFixedDepth + WithTT variants
+│   ├── moveorder.go    MVV + killers + history ordering, previousBest/TT-move-to-front, killerTable + historyTable types
+│   ├── types.go        SearchResult, searchCtx (with tt, killers, history, disableNullMove flag), shouldStop()
 │   └── ai.go           Evaluate() — O(1) incremental read
     ↓ imports
 pkg/engine           ← Position, MoveList, Make/Unmake, PseudoLegalMoves, PseudoLegalCaptures, IsInCheck, CurrentStatus, TranspositionTable, Zobrist

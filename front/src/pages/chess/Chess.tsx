@@ -21,6 +21,7 @@ const MODES: { value: ChessGameMode; label: string }[] = [
   { value: "human-vs-ai", label: "Humano vs IA" },
   { value: "human-vs-human", label: "Humano vs Humano" },
   { value: "ai-vs-ai", label: "IA vs IA" },
+  { value: "analysis", label: "Análise" },
 ];
 
 const DIFFICULTIES: { value: ChessDifficulty; label: string }[] = [
@@ -84,6 +85,10 @@ export const Chess = () => {
     analyze,
     autoAnalyze,
     setAutoAnalyze,
+    analyzeCurrentPosition,
+    analysisForPly,
+    exportPgn,
+    loadPgn,
   } = useChess(
     mode,
     aiColor,
@@ -111,25 +116,39 @@ export const Chess = () => {
   const resultText = result ? RESULT_TEXT[result] : null;
   const gameOver = result !== null && isAtLatest;
 
+  const isAnalysisMode = mode === "analysis";
+
   const [analysis, setAnalysis] = useState<AiAnalysisResult | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
-  const [arrow, setArrow] = useState<{ from: number; to: number } | null>(null);
+
+  const [pgnModalOpen, setPgnModalOpen] = useState(false);
+  const [pgnText, setPgnText] = useState("");
+  const [pgnError, setPgnError] = useState<string | null>(null);
+  const [copyStatus, setCopyStatus] = useState<"idle" | "copied">("idle");
+
+  const savedAnalysis = isAtLatest ? null : analysisForPly(currentPly) ?? null;
+  const displayedAnalysis = isAtLatest ? analysis : savedAnalysis;
+  const arrow = displayedAnalysis
+    ? { from: displayedAnalysis.from, to: displayedAnalysis.to }
+    : null;
 
   const handleRestart = () => {
     setAnalysis(null);
-    setArrow(null);
+    setPgnText("");
+    setPgnError(null);
     restartGame();
   };
 
   const handleAnalyze = async () => {
-    if (analyzing || result) return;
+    if (analyzing) return;
+    if (result && isAtLatest) return;
     setAnalyzing(true);
-    setArrow(null);
     try {
-      const res = await analyze(1000);
-      setAnalysis(res);
-      if (res) {
-        setArrow({ from: res.from, to: res.to });
+      if (isAnalysisMode || !isAtLatest) {
+        await analyzeCurrentPosition();
+      } else {
+        const res = await analyze(1000);
+        setAnalysis(res);
       }
     } finally {
       setAnalyzing(false);
@@ -138,7 +157,42 @@ export const Chess = () => {
 
   const handleCloseAnalysis = () => {
     setAnalysis(null);
-    setArrow(null);
+  };
+
+  const handleCopyPgn = async () => {
+    const pgn = exportPgn();
+    if (!pgn) return;
+    try {
+      await navigator.clipboard.writeText(pgn);
+      setCopyStatus("copied");
+      setTimeout(() => setCopyStatus("idle"), 2000);
+    } catch {
+      setPgnModalOpen(true);
+      setPgnText(pgn);
+    }
+  };
+
+  const handleLoadPgn = async () => {
+    setPgnError(null);
+    if (!pgnText.trim()) {
+      setPgnError("Cole um PGN primeiro.");
+      return;
+    }
+    const ok = await loadPgn(pgnText);
+    if (!ok) {
+      setPgnError("Não foi possível ler o PGN. Verifique a notação.");
+      return;
+    }
+    setPgnModalOpen(false);
+    setAnalysis(null);
+  };
+
+  const handleModeChange = (newMode: ChessGameMode) => {
+    handleRestart();
+    setMode(newMode);
+    if (newMode === "analysis") {
+      setAutoAnalyze(true);
+    }
   };
 
   const handleClockPreset = (minutes: number) => {
@@ -168,22 +222,18 @@ export const Chess = () => {
       switch (e.key) {
         case "ArrowLeft":
           e.preventDefault();
-          setArrow(null);
           jumpToPly(currentPly - 1);
           break;
         case "ArrowRight":
           e.preventDefault();
-          setArrow(null);
           jumpToPly(currentPly + 1);
           break;
         case "Home":
           e.preventDefault();
-          setArrow(null);
           jumpToPly(0);
           break;
         case "End":
           e.preventDefault();
-          setArrow(null);
           jumpToPly(history.length);
           break;
       }
@@ -203,10 +253,7 @@ export const Chess = () => {
               <button
                 key={m.value}
                 className={`${styles.modeButton} ${mode === m.value ? styles.modeButtonActive : ""}`}
-                onClick={() => {
-                  restartGame();
-                  setMode(m.value);
-                }}
+                onClick={() => handleModeChange(m.value)}
               >
                 {m.label}
               </button>
@@ -349,7 +396,27 @@ export const Chess = () => {
             >
               Girar ↺
             </button>
-            {!result && (
+            {history.length > 0 && (
+              <button
+                className={`${styles.actionButton} ${copyStatus === "copied" ? styles.actionButtonActive : ""}`}
+                onClick={handleCopyPgn}
+                title="Copia o PGN da partida para a área de transferência"
+              >
+                {copyStatus === "copied" ? "Copiado ✓" : "Copiar PGN"}
+              </button>
+            )}
+            <button
+              className={styles.actionButton}
+              onClick={() => {
+                setPgnText("");
+                setPgnError(null);
+                setPgnModalOpen(true);
+              }}
+              title="Cola um PGN para visualizar a partida"
+            >
+              Colar PGN
+            </button>
+            {(!result || !isAtLatest) && (
               <button
                 className={styles.actionButton}
                 onClick={handleAnalyze}
@@ -358,7 +425,7 @@ export const Chess = () => {
                 {analyzing ? "Analisando..." : "Analisar"}
               </button>
             )}
-            {!result && (
+            {(!result || isAnalysisMode) && (
               <button
                 className={`${styles.actionButton} ${autoAnalyze ? styles.actionButtonActive : ""}`}
                 onClick={() => setAutoAnalyze(!autoAnalyze)}
@@ -369,30 +436,32 @@ export const Chess = () => {
             )}
           </div>
 
-          {analysis && (
+          {displayedAnalysis && (
             <div className={styles.analysisPanel}>
               <div className={styles.analysisRow}>
                 <span className={styles.analysisLabel}>Avaliação</span>
                 <span className={styles.analysisValue}>
-                  {(analysis.score / 100).toFixed(2)}
+                  {(displayedAnalysis.score / 100).toFixed(2)}
                 </span>
               </div>
               <div className={styles.analysisRow}>
                 <span className={styles.analysisLabel}>Melhor lance</span>
                 <span className={styles.analysisValue}>
-                  {squareName(analysis.from)}→{squareName(analysis.to)}
+                  {squareName(displayedAnalysis.from)}→{squareName(displayedAnalysis.to)}
                 </span>
               </div>
               <div className={styles.analysisRow}>
                 <span className={styles.analysisLabel}>Profundidade</span>
-                <span className={styles.analysisValue}>{analysis.depth}</span>
+                <span className={styles.analysisValue}>{displayedAnalysis.depth}</span>
               </div>
-              <button
-                className={styles.closeAnalysis}
-                onClick={handleCloseAnalysis}
-              >
-                ✕
-              </button>
+              {isAtLatest && (
+                <button
+                  className={styles.closeAnalysis}
+                  onClick={handleCloseAnalysis}
+                >
+                  ✕
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -452,6 +521,52 @@ export const Chess = () => {
           onSelect={choosePromotion}
           onCancel={cancelPromotion}
         />
+      )}
+
+      {pgnModalOpen && (
+        <div className={styles.pgnOverlay} onClick={() => setPgnModalOpen(false)}>
+          <div className={styles.pgnModal} onClick={(e) => e.stopPropagation()}>
+            <div className={styles.pgnModalHeader}>
+              <span className={styles.pgnModalTitle}>Importar PGN</span>
+              <button
+                className={styles.pgnCloseBtn}
+                onClick={() => setPgnModalOpen(false)}
+              >
+                ✕
+              </button>
+            </div>
+            <p className={styles.pgnHint}>
+              Cole a notação PGN de uma partida para visualizá-la lance a lance.
+            </p>
+            <textarea
+              className={styles.pgnTextarea}
+              value={pgnText}
+              onChange={(e) => {
+                setPgnText(e.target.value);
+                setPgnError(null);
+              }}
+              placeholder="[Event &quot;...&quot;]&#10;1. e4 e5 2. Nf3 Nc6 ..."
+              rows={10}
+              autoFocus
+            />
+            {pgnError && <div className={styles.pgnError}>{pgnError}</div>}
+            <div className={styles.pgnModalActions}>
+              <button
+                className={styles.actionButton}
+                onClick={() => setPgnModalOpen(false)}
+              >
+                Cancelar
+              </button>
+              <button
+                className={styles.pgnLoadButton}
+                onClick={handleLoadPgn}
+                disabled={!pgnText.trim()}
+              >
+                Carregar
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

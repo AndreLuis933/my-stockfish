@@ -1,13 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChessBoard, ChessColor } from "@/types/chess";
 import { emptyBoard } from "@/utils/chessEngine";
-import { toSan, type MoveData } from "@/utils/chessNotation";
+import {
+  historyToPgn,
+  parsePgn,
+  stripCheckSuffix,
+  toSan,
+  type MoveData,
+} from "@/utils/chessNotation";
 import type { ClockConfig, UseChessClock } from "@/hooks/useChessClock";
 import { useChessClock } from "@/hooks/useChessClock";
 import type { WasmEngine, AiAnalysisResult } from "@/wasm/generated/wasm-contract";
 import { useWasm } from "@/wasm/useWasm";
 
-export type ChessGameMode = "human-vs-ai" | "human-vs-human" | "ai-vs-ai";
+export type ChessGameMode = "human-vs-ai" | "human-vs-human" | "ai-vs-ai" | "analysis";
 export type ChessResult = "white-wins" | "black-wins" | "draw" | null;
 export type ChessDifficulty = "easy" | "medium" | "hard";
 export type ChessSearchMode = "difficulty" | "time" | "depth";
@@ -87,6 +93,98 @@ const DIFFICULTY_MS: Record<ChessDifficulty, number> = {
 
 const AI_DELAY_MS = 400;
 
+const FILES = "abcdefgh";
+
+const PROMOTION_LETTER_TO_BYTE: Record<string, number> = {
+  Q: 0b00010000,
+  R: 0b00001000,
+  B: 0b00000100,
+  N: 0b00000010,
+};
+
+const matchSanToLegal = (
+  san: string,
+  legalMoves: { from: number; to: number; promotion?: number }[],
+  color: ChessColor,
+): { from: number; to: number; promotion?: number } | null => {
+  const clean = stripCheckSuffix(san).trim();
+
+  if (clean === "O-O" || clean === "0-0") {
+    const fromRank = color === "white" ? 0 : 7;
+    const kingFrom = fromRank * 8 + 4;
+    const kingTo = fromRank * 8 + 6;
+    return (
+      legalMoves.find((m) => m.from === kingFrom && m.to === kingTo) ?? null
+    );
+  }
+  if (clean === "O-O-O" || clean === "0-0-0") {
+    const fromRank = color === "white" ? 0 : 7;
+    const kingFrom = fromRank * 8 + 4;
+    const kingTo = fromRank * 8 + 2;
+    return (
+      legalMoves.find((m) => m.from === kingFrom && m.to === kingTo) ?? null
+    );
+  }
+
+  const promoMatch = clean.match(/=([QRBN])$/);
+  const promoLetter = promoMatch?.[1];
+  let working = promoMatch ? clean.slice(0, -promoMatch[0].length) : clean;
+
+  const toSquare = working.slice(-2);
+  const toIdx = FILES.indexOf(toSquare[0]);
+  if (toIdx === -1) return null;
+  const toRank = parseInt(toSquare[1], 10);
+  if (isNaN(toRank) || toRank < 1 || toRank > 8) return null;
+  const to = (8 - toRank) * 8 + toIdx;
+
+  working = working.slice(0, -2);
+
+  const isCapture = working.endsWith("x");
+  if (isCapture) working = working.slice(0, -1);
+
+  const pieceMatch = working.match(/^[NBRQK]/);
+  const pieceLetter = pieceMatch?.[0];
+  let disamb = working;
+  if (pieceLetter) disamb = working.slice(1);
+
+  const candidates = legalMoves.filter((m) => m.to === to);
+
+  const targetPromo = promoLetter
+    ? (PROMOTION_LETTER_TO_BYTE[promoLetter] ?? 0) |
+      (color === "white" ? 0b01000000 : 0b10000000)
+    : undefined;
+
+  const promoFiltered = promoLetter
+    ? candidates.filter((m) => (m.promotion ?? 0) === (targetPromo ?? 0))
+    : candidates.filter((m) => !m.promotion);
+
+  if (promoFiltered.length === 0) return null;
+
+  if (!pieceLetter || pieceLetter === "P") {
+    if (!disamb) return promoFiltered[0] ?? null;
+    if (disamb.length === 1) {
+      const c = disamb;
+      if (FILES.includes(c)) {
+        const fromFile = FILES.indexOf(c);
+        return (
+          promoFiltered.find((m) => Math.floor(m.from / 8) !== -1 && m.from % 8 === fromFile) ??
+          null
+        );
+      }
+      const rankNum = parseInt(c, 10);
+      if (!isNaN(rankNum)) {
+        const fromRankIdx = 8 - rankNum;
+        return (
+          promoFiltered.find((m) => Math.floor(m.from / 8) === fromRankIdx) ??
+          null
+        );
+      }
+    }
+  }
+
+  return promoFiltered[0] ?? null;
+};
+
 export interface UseChessReturn {
   state: ChessState;
   history: HistoryEntry[];
@@ -102,6 +200,10 @@ export interface UseChessReturn {
   analyze: (timeLimitMs: number) => Promise<AiAnalysisResult | null>;
   autoAnalyze: boolean;
   setAutoAnalyze: (on: boolean) => void;
+  analyzeCurrentPosition: () => Promise<void>;
+  analysisForPly: (ply: number) => AiAnalysisResult | null | undefined;
+  exportPgn: () => string;
+  loadPgn: (pgn: string) => Promise<boolean>;
 }
 
 export const useChess = (
@@ -254,7 +356,7 @@ export const useChess = (
   // ── AI turn effect ─────────────────────────────────────
   useEffect(() => {
     if (!engine || result !== null) return;
-    if (mode === "human-vs-human") return;
+    if (mode === "human-vs-human" || mode === "analysis") return;
     if (mode === "human-vs-ai" && currentPlayer !== aiColor) return;
     if (!isAtLatest) return;
 
@@ -466,6 +568,130 @@ export const useChess = (
     };
   }, [engine, autoAnalyze, history, isAtLatest, analyze]);
 
+  // ── Analysis for a specific ply (from saved history) ──
+  const analysisForPly = useCallback(
+    (ply: number): AiAnalysisResult | null | undefined => {
+      if (ply <= 0 || ply > history.length) return undefined;
+      return history[ply - 1].analysis;
+    },
+    [history],
+  );
+
+  // ── Analyze current viewed position (saves into history) ──
+  const analyzeCurrentPosition = useCallback(async () => {
+    if (!engine) return;
+    if (currentPly <= 0 || currentPly > historyRef.current.length) return;
+
+    const ply = currentPly;
+    const result = await analyze(1000);
+    if (!result) return;
+
+    setHistory((h) => {
+      if (ply > h.length) return h;
+      const updated = h.slice();
+      updated[ply - 1] = { ...updated[ply - 1], analysis: result };
+      return updated;
+    });
+  }, [engine, analyze, currentPly]);
+
+  // ── Export PGN of the current game ─────────────────────
+  const exportPgn = useCallback((): string => {
+    return historyToPgn(history, state.result);
+  }, [history, state.result]);
+
+  // ── Load a game from PGN (view-only) ───────────────────
+  const loadPgn = useCallback(
+    async (pgn: string): Promise<boolean> => {
+      if (!engine) return false;
+      const sanMoves = parsePgn(pgn);
+      if (sanMoves.length === 0) return false;
+
+      const currentEngine = engine;
+
+      await currentEngine.initBoard();
+
+      const rebuiltHistory: HistoryEntry[] = [];
+      let moverColor: ChessColor = "white";
+      let lastBoard = emptyBoard();
+      let lastCheckSquare: number | null = null;
+      let gameResult: ChessResult = null;
+
+      for (const sanToken of sanMoves) {
+        const movesJson = await currentEngine.validMovesChess();
+        const legalMoves: Move[] = JSON.parse(movesJson);
+
+        const matched = matchSanToLegal(
+          sanToken,
+          legalMoves,
+          moverColor,
+        );
+
+        if (!matched) return false;
+
+        const boardBefore = lastBoard;
+        const rawBoard = await currentEngine.makeMove(
+          matched.from,
+          matched.to,
+          matched.promotion ?? 0,
+        );
+        const boardAfter = Array.from(rawBoard) as ChessBoard;
+        const checkSquare = await currentEngine.isCheckJS();
+        const status = await currentEngine.gameStatus();
+        const checkSq = checkSquare === -1 ? null : checkSquare;
+        const result = toResult(status);
+        const isCheckmate = result !== null && result !== "draw";
+
+        rebuiltHistory.push({
+          san: sanToken,
+          color: moverColor,
+          from: matched.from,
+          to: matched.to,
+          promotion: matched.promotion || undefined,
+          boardBefore,
+          boardAfter,
+          checkSquareAfter: checkSq,
+          isCheckmate,
+        });
+
+        lastBoard = boardAfter;
+        lastCheckSquare = checkSq;
+        gameResult = result;
+        moverColor = moverColor === "white" ? "black" : "white";
+      }
+
+      setHistory(rebuiltHistory);
+      setCurrentPly(rebuiltHistory.length);
+      setGameStarted(true);
+      setState((p) => ({
+        ...p,
+        board: lastBoard,
+        selectedSquare: null,
+        validMoveSquares: [],
+        candidateMoves: [],
+        currentPlayer: moverColor,
+        checkSquare: lastCheckSquare,
+        result: gameResult,
+        lastMove:
+          rebuiltHistory.length > 0
+            ? {
+                from: rebuiltHistory[rebuiltHistory.length - 1].from,
+                to: rebuiltHistory[rebuiltHistory.length - 1].to,
+              }
+            : null,
+        boardBefore:
+          rebuiltHistory.length > 0
+            ? rebuiltHistory[rebuiltHistory.length - 1].boardBefore
+            : null,
+        animateId: p.animateId + 1,
+        pendingPromotion: null,
+        aiThinking: false,
+      }));
+
+      return true;
+    },
+    [engine],
+  );
+
   // ── Navigation (jump to ply) ───────────────────────────
   const jumpToPly = useCallback(
     (ply: number) => {
@@ -521,6 +747,10 @@ export const useChess = (
       analyze,
       autoAnalyze,
       setAutoAnalyze,
+      analyzeCurrentPosition,
+      analysisForPly,
+      exportPgn,
+      loadPgn,
     }),
     [
       state,
@@ -536,6 +766,10 @@ export const useChess = (
       gameStarted,
       analyze,
       autoAnalyze,
+      analyzeCurrentPosition,
+      analysisForPly,
+      exportPgn,
+      loadPgn,
     ],
   );
 

@@ -29,6 +29,13 @@ func quiescence(p *engine.Position, alpha, beta int, ctx *searchCtx) int {
 		return 0
 	}
 
+	// Threefold repetition: return draw before stand-pat, so a repeating
+	// position returns 0 instead of a stale winning eval. The 50-move rule
+	// is not checked here because quiescence doesn't detect mate anyway.
+	if p.IsRepetition() {
+		return 0
+	}
+
 	// Stand-pat: the side to move can "pass" and keep the current position.
 	// If the static eval is already good enough, prune.
 	standPat := Evaluate(p)
@@ -39,14 +46,14 @@ func quiescence(p *engine.Position, alpha, beta int, ctx *searchCtx) int {
 		alpha = standPat
 	}
 
-	// Repetition / 50-move: draw in quiescence too.
-	if p.HalfmoveClock >= 100 || p.IsRepetition() {
+	// 50-move rule: draw in quiescence too.
+	if p.HalfmoveClock >= 100 {
 		return 0
 	}
 
 	var ml engine.MoveList
 	p.PseudoLegalCaptures(&ml)
-	orderMoves(&ml, nil)
+	orderMoves(&ml, nil, nil, nil, 0)
 
 	moverColor := sideColor(p)
 

@@ -6,7 +6,7 @@ const FILES = "abcdefgh";
 export const squareName = (index: number): string => {
   const file = FILES[index % 8];
   const rank = Math.floor(index / 8);
-  return `${file}${8 - rank}`;
+  return `${file}${rank + 1}`;
 };
 
 const PIECE_LETTERS: Record<ChessPieceType, string> = {
@@ -174,6 +174,80 @@ const appendCheckSuffix = (
   if (isCheckmate) return `${san}#`;
   if (checkSquare !== null) return `${san}+`;
   return san;
+};
+
+export const stripCheckSuffix = (san: string): string =>
+  san.replace(/[+#]+$/, "").replace(/[!?]+$/, "");
+
+export const historyToPgn = (
+  history: { san: string; color: ChessColor }[],
+  result: "white-wins" | "black-wins" | "draw" | null,
+): string => {
+  const now = new Date();
+  const dateStr = `${now.getFullYear()}.${String(now.getMonth() + 1).padStart(2, "0")}.${String(now.getDate()).padStart(2, "0")}`;
+  const resultStr =
+    result === "white-wins"
+      ? "1-0"
+      : result === "black-wins"
+        ? "0-1"
+        : result === "draw"
+          ? "1/2-1/2"
+          : "*";
+
+  const headers = [
+    "[Event \"Partida local\"]",
+    "[Site \"my-stockfish\"]",
+    `[Date "${dateStr}"]`,
+    "[White \"Brancas\"]",
+    "[Black \"Pretas\"]",
+    `[Result "${resultStr}"]`,
+  ];
+
+  const tokens: string[] = [];
+  for (let i = 0; i < history.length; i++) {
+    const moveNum = Math.floor(i / 2) + 1;
+    const isWhite = history[i].color === "white";
+    if (isWhite) {
+      tokens.push(`${moveNum}. ${history[i].san}`);
+    } else {
+      if (i === 0) tokens.push(`1... ${history[i].san}`);
+      else tokens.push(history[i].san);
+    }
+  }
+
+  const lines: string[] = [];
+  let line = "";
+  for (const tok of tokens) {
+    if (line && line.length + 1 + tok.length > 78) {
+      lines.push(line);
+      line = "";
+    }
+    line = line ? `${line} ${tok}` : tok;
+  }
+  if (line) lines.push(line);
+
+  return `${headers.join("\n")}\n\n${lines.join("\n")} ${resultStr}`;
+};
+
+export const parsePgn = (pgn: string): string[] => {
+  const withoutHeaders = pgn
+    .split("\n")
+    .filter((l) => !l.trim().startsWith("["))
+    .join(" ");
+
+  let s = withoutHeaders.replace(/\{[^}]*\}/g, " ");
+  while (/\([^)]*\)/.test(s)) s = s.replace(/\([^)]*\)/g, " ");
+  s = s.replace(/\$\d+/g, " ");
+
+  const rawTokens = s.split(/\s+/).filter(Boolean);
+  const moves: string[] = [];
+  for (let tok of rawTokens) {
+    tok = tok.replace(/^\d+\.+/, "");
+    if (!tok) continue;
+    if (tok === "1-0" || tok === "0-1" || tok === "1/2-1/2" || tok === "*") continue;
+    moves.push(tok);
+  }
+  return moves;
 };
 
 export const promoByte = (

@@ -5,6 +5,11 @@ import (
 	"webassemble/pkg/types"
 )
 
+// aspirationWindow is the half-width of the aspiration window around the
+// previous iteration's score. If the score falls outside [score-window,
+// score+window], we re-search with a full window.
+const aspirationWindow = 50
+
 // iterativeDeepening runs depth 1, 2, 3... up to depthCap, returning the best
 // move from the last fully-completed depth. Aborted partial results are
 // discarded. Stops early on a forced mate.
@@ -13,12 +18,53 @@ import (
 // the time runs out mid-depth, we fall back to the best move from the previous
 // depth. The previous depth's best move is searched first at each new depth to
 // maximize alpha-beta cutoffs. The TT accumulates across all depths.
+//
+// Aspiration windows: from depth 2 onward, we search with a narrow window
+// around the previous iteration's score instead of [-inf, +inf]. When the
+// score falls inside the window (the common case), this prunes much more. On
+// fail-low or fail-high, we re-search with the full window — the TT makes
+// this re-search cheap (subtree nodes are already cached).
 func iterativeDeepening(p *engine.Position, ctx *searchCtx, depthCap int) SearchResult {
 	var best SearchResult
 	var previousBest *types.Move
 
 	for depth := 1; depth <= depthCap; depth++ {
-		score, move := negamax(p, depth, negInf, -negInf, ctx, previousBest)
+		// Age the history table between iterations: older cutoffs become
+		// less relevant as the search deepens. Killers are overwritten
+		// naturally as new cutoffs replace old ones.
+		ctx.history.age()
+
+		var score int
+		var move types.Move
+
+		if depth >= 3 && previousBest != nil {
+			// Aspiration window around the previous iteration's score.
+			alpha := best.Score - aspirationWindow
+			beta := best.Score + aspirationWindow
+
+			for {
+				score, move = negamax(p, depth, alpha, beta, ctx, previousBest)
+				if ctx.aborted {
+					break
+				}
+
+				if score <= alpha {
+					// Fail-low: score is an upper bound, true score is
+					// lower. Widen the window downward and re-search.
+					alpha = negInf
+				} else if score >= beta {
+					// Fail-high: score is a lower bound, true score is
+					// higher. Widen upward and re-search.
+					beta = -negInf
+				} else {
+					// Score is exact — inside the window.
+					break
+				}
+			}
+		} else {
+			score, move = negamax(p, depth, negInf, -negInf, ctx, previousBest)
+		}
+
 		if ctx.aborted {
 			break
 		}

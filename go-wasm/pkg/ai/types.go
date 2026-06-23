@@ -9,6 +9,7 @@ const (
 	winScore      = 30_000
 	nodeCheckMask = 2047
 	maxDepth      = 32
+	maxPly        = 256
 	negInf        = -32_000
 )
 
@@ -21,7 +22,10 @@ type SearchResult struct {
 	TimeMs int64
 }
 
-// searchCtx tracks time, node count, abort state, and TT across the recursion.
+// searchCtx tracks time, node count, abort state, TT, and move-ordering
+// heuristics (killers + history) across the recursion. The killer and history
+// tables are per-search (cleared at the start of each iterative-deepening
+// iteration by the root caller).
 type searchCtx struct {
 	startTime   float64
 	timeLimitMs float64
@@ -29,6 +33,12 @@ type searchCtx struct {
 	aborted     bool
 	stopCh      <-chan struct{}
 	tt          *engine.TranspositionTable
+	killers     killerTable
+	history     historyTable
+	// disableNullMove turns off null-move pruning. Used by tests to A/B
+	// compare pruning behavior and by positions where pruning is known to
+	// be unsafe. A single bool checked once per node — negligible cost.
+	disableNullMove bool
 }
 
 // shouldStop checks if the search has exceeded its time budget or received an

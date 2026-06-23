@@ -63,8 +63,18 @@ func initZobrist() {
 	}
 }
 
+// ZobristSideKey is the side-to-move Zobrist key. Exposed for the AI's
+// null-move pruning, which flips the side without going through Make.
+var ZobristSideKey uint64
+
+// ZobristEPKeys is the en-passant-file Zobrist key array. Exposed for the
+// AI's null-move pruning.
+var ZobristEPKeys [8]uint64
+
 func init() {
 	initZobrist()
+	ZobristSideKey = zobristSide
+	ZobristEPKeys = zobristEP
 }
 
 // ComputeHash computes the full Zobrist hash for a position from scratch.

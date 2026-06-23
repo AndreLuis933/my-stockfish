@@ -12,6 +12,27 @@ const (
 	ttUpper = 3 // score is an upper bound (no move improved alpha)
 )
 
+// Search tuning constants.
+const (
+	// nullMoveReduction is the depth reduction applied during null-move
+	// pruning. The classic value is 2 ("R=2"); deeper reduction prunes more
+	// but risks missing zugzwang defenses.
+	nullMoveReduction = 2
+
+	// lmrFullMoves is the number of moves searched at full depth before LMR
+	// kicks in. The PV move and captures are always full-depth.
+	lmrFullMoves = 3
+
+	// lmrMinDepth is the minimum remaining depth for LMR to apply. At very
+	// shallow depths reducing further risks missing tactics.
+	lmrMinDepth = 3
+
+	// lmrReduction is the base depth reduction for late moves. The actual
+	// reduction is this value plus a small bonus based on how late the move
+	// is in the list.
+	lmrReduction = 1
+)
+
 // mateScore returns true if the score is near a forced mate (win or loss).
 // Used to adjust mate scores for TT storage: mate distances are relative to
 // the ply where they're found, so they must be stored as absolute values.
@@ -44,13 +65,36 @@ func scoreFromTT(score int16, ply int) int {
 	return s
 }
 
+// hasNonPawnMaterial returns true if the side to move has any non-pawn,
+// non-king material. Used to guard null-move pruning: in positions where
+// the side to move has only pawns + king, zugzwang is more likely and the
+// "pass" null move is unsafe.
+func hasNonPawnMaterial(p *engine.Position) bool {
+	moverColor := sideColor(p)
+	for _, piece := range p.Board {
+		if piece == 0 || piece.Color() != moverColor {
+			continue
+		}
+		t := piece & types.TypeMask
+		if t == types.Knight || t == types.Bishop || t == types.Rook || t == types.Queen {
+			return true
+		}
+	}
+	return false
+}
+
 // negamax is the recursive search core. Returns the score from the perspective
 // of the side to move and the best move found, using alpha-beta pruning with
 // negamax symmetry.
 //
-// TT integration: before move generation, probe the TT. If a usable entry is
-// found (sufficient depth + matching bound), return immediately. Otherwise,
-// use the stored move for ordering. After the search, store the result.
+// Features, in order of application per node:
+//   - TT probe: return early if a usable entry is found, else use TT move for ordering
+//   - Check extension at the leaf (in check → search one more ply)
+//   - Null-move pruning: pass once; if still ≥ beta, prune (skip in check / endgame)
+//   - Move generation + ordering (TT move, captures by MVV, killers, history)
+//   - Late move reductions: full depth for the first few moves, reduced for the rest
+//   - Alpha-beta cutoffs with killer/history recording on quiet cutoffs
+//   - TT store with bound classification
 //
 // previousBest (from iterative deepening) is used for move ordering at the
 // root only — pass nil at internal nodes.
@@ -65,15 +109,32 @@ func negamax(p *engine.Position, depth, alpha, beta int, ctx *searchCtx, previou
 		return 0, types.Move{}
 	}
 
-	// 50-move / repetition draws are checked after move generation below:
-	// checkmate/stalemate must be detected first, since a position can be
-	// both "HalfmoveClock >= 100" and checkmate, and checkmate wins.
+	ply := p.Ply()
+
+	// Threefold repetition must be checked BEFORE the TT probe.
+	// Without this, a position that is already a draw by repetition can
+	// return a stale winning score from the TT (stored before the position
+	// repeated), causing the engine to play into a 3-fold repetition while
+	// thinking it's winning. The TT entry was correct when it was stored
+	// (the position hadn't repeated yet), but it's wrong now.
+	//
+	// The 50-move rule is NOT checked here: a position can be both
+	// "HalfmoveClock >= 100" and checkmate, and checkmate wins. The 50-move
+	// check stays after the move loop where mate/stalemate is detected first.
+	if p.IsRepetition() {
+		return 0, types.Move{}
+	}
 
 	// TT probe: if we have a usable entry, return its score. Even if the
 	// depth is insufficient, the stored move improves ordering.
-	ply := p.Ply()
+	//
+	// When the current position is a twofold repetition, the TT score may
+	// be stale: the entry was stored when the position had only occurred
+	// once, so children that are now 3-fold repetitions (score 0) were
+	// scored as winning. Skip the TT probe in this case to force a fresh
+	// search that correctly detects the 3-fold repetition in children.
 	var ttMove *types.Move
-	if ctx.tt != nil {
+	if ctx.tt != nil && !p.IsTwoFoldRepetition() {
 		if entry, ok := ctx.tt.Probe(p.Hash); ok {
 			if entry.Depth >= uint8(depth) {
 				score := scoreFromTT(entry.Score, ply)
@@ -105,7 +166,7 @@ func negamax(p *engine.Position, depth, alpha, beta int, ctx *searchCtx, previou
 	// dropping into quiescence. Quiescence only searches captures and
 	// returns stand-pat eval — it cannot detect checkmate (no legal moves
 	// while in check). Without this extension, the engine misses mate-in-1
-	// at the depth horizon: Qb2# would score as a normal eval, not +winScore.
+	// at the depth horizon.
 	moverColor := sideColor(p)
 	inCheck := p.IsInCheck(moverColor)
 	if depth == 0 {
@@ -116,9 +177,49 @@ func negamax(p *engine.Position, depth, alpha, beta int, ctx *searchCtx, previou
 		}
 	}
 
+	// Null-move pruning: let the side to move "pass" (do nothing) and search
+	// the opponent's reply at reduced depth. If even that is ≥ beta, the
+	// position is so good we can prune — the side to move would do at least
+	// as well with a real move.
+	//
+	// Conditions to avoid zugzwang false positives:
+	//   - not in check (can't pass while in check)
+	//   - side has non-pawn material (zugzwang unlikely)
+	//   - skip at the root (ply 0) — we need a real best move
+	//   - not a ply where we'd store a useless "null move" killer
+	//   - depth > nullMoveReduction+1 so the reduced search is meaningful
+	if !inCheck && ply > 0 && depth > nullMoveReduction+1 && hasNonPawnMaterial(p) && !ctx.disableNullMove {
+		// Make a null move: flip the side, clear en passant, update hash.
+		// We do this inline rather than via a Make() with a sentinel move
+		// because Make expects a real move and would corrupt the board.
+		oldEP := p.EnPassantTarget
+		oldHash := p.Hash
+		p.WhiteToMove = !p.WhiteToMove
+		p.EnPassantTarget = -1
+		p.Hash ^= engine.ZobristSideKey
+		if oldEP >= 0 {
+			p.Hash ^= engine.ZobristEPKeys[oldEP%8]
+		}
+
+		nullScoreValue, _ := negamax(p, depth-1-nullMoveReduction, -beta, -beta+1, ctx, nil)
+		nullScore := -nullScoreValue
+
+		// Unmake the null move.
+		p.WhiteToMove = !p.WhiteToMove
+		p.EnPassantTarget = oldEP
+		p.Hash = oldHash
+
+		if ctx.aborted {
+			return 0, types.Move{}
+		}
+		if nullScore >= beta {
+			return nullScore, types.Move{}
+		}
+	}
+
 	var ml engine.MoveList
 	p.PseudoLegalMoves(&ml)
-	orderMoves(&ml, ttMove)
+	orderMoves(&ml, ttMove, &ctx.killers, &ctx.history, ply)
 
 	best := negInf
 	bestMove := types.Move{}
@@ -129,13 +230,47 @@ func negamax(p *engine.Position, depth, alpha, beta int, ctx *searchCtx, previou
 			break
 		}
 		m := ml.Get(i)
+		isCapture := m.Captured != 0 || m.Flag == types.FlagEnPassant
+		isPromotion := m.Flag == types.FlagPromotion
 		p.Make(m)
 		if p.IsInCheck(moverColor) {
 			p.Unmake(m)
 			continue
 		}
+
+		// Late move reductions (LMR): for moves after the first few, search
+		// at reduced depth. If the reduced search improves alpha, re-search
+		// at full depth to confirm. This trades a small risk of missing
+		// tactics for a large node-count reduction.
+		//
+		// Conditions: depth deep enough, not a capture/promotion (those are
+		// "noisy" and need full depth), not a killer (killers are good
+		// candidates for full depth), and not the PV/TT move (i==0).
+		reduced := false
+		if i >= lmrFullMoves && depth >= lmrMinDepth && !isCapture && !isPromotion &&
+			!ctx.killers.isKiller(ply, m) {
+			// Search at depth-1-lmrReduction. Use a null-window around
+			// alpha for the reduced search (since we only care if it
+			// beats alpha, not the exact value).
+			score, _ := negamax(p, depth-1-lmrReduction, -alpha-1, -alpha, ctx, nil)
+			score = -score
+			reduced = true
+			if score <= alpha {
+				// Reduced search didn't improve alpha — keep this score
+				// as the result, no re-search needed.
+				p.Unmake(m)
+				if score > best {
+					best = score
+					bestMove = m
+				}
+				continue
+			}
+			// Reduced search beat alpha — re-search at full depth below.
+		}
+
 		score, _ := negamax(p, depth-1, -beta, -alpha, ctx, nil)
 		score = -score
+		_ = reduced
 		p.Unmake(m)
 
 		if ctx.aborted {
@@ -149,6 +284,13 @@ func negamax(p *engine.Position, depth, alpha, beta int, ctx *searchCtx, previou
 			alpha = best
 		}
 		if alpha >= beta {
+			// Beta cutoff — record the cutoff move in killers + history
+			// if it's a quiet move. Captures are already well-ordered by
+			// MVV and don't need heuristic help.
+			if !isCapture {
+				ctx.killers.storeKiller(ply, m)
+				ctx.history.store(m, depth)
+			}
 			break
 		}
 	}
@@ -157,16 +299,12 @@ func negamax(p *engine.Position, depth, alpha, beta int, ctx *searchCtx, previou
 		return noLegalMoveScore(inCheck, ply), types.Move{}
 	}
 
-	// 50-move rule and threefold repetition are claimable draws: the side
-	// to move can claim the draw (score 0), but only if it's better than
-	// their best move. If checkmate is available (best > 0), the side plays
-	// on and wins. If all moves are worse than a draw, the side claims it.
-	// This is checked after the move loop so mate/stalemate (no legal moves)
-	// is detected first — noLegalMoveScore handles those.
-	if p.HalfmoveClock >= 100 || p.IsRepetition() {
-		if best < 0 {
-			best = 0
-		}
+	// 50-move rule: a claimable draw. If the side to move is losing (best < 0),
+	// the draw is better — clamp to 0. If winning, play on. This is checked
+	// after the move loop so checkmate/stalemate (no legal moves) is detected
+	// first — a checkmated position is never a draw.
+	if p.HalfmoveClock >= 100 && best < 0 {
+		best = 0
 	}
 
 	// TT store: save the result with the appropriate bound flag.
