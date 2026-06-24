@@ -84,24 +84,26 @@ my-stockfish/
 │   │   │   ├── status.go          # GameStatus enum + Position.CurrentStatus(): checks IsDraw() (50-move, repetition, insufficient material) + checkmate/stalemate
 │   │   │   ├── draw.go            # IsRepetition() (undo stack hash scan), IsTwoFoldRepetition(), IsFiftyMoveRule(), IsInsufficientMaterial() (zero-alloc: K vs K, K+B vs K, K+N vs K, K+B vs K+B same color), IsDraw()
 │   │   │   ├── zobrist.go         # Zobrist hashing: [12][64]uint64 piece keys + side + castling + EP keys (fixed seed), ComputeHash() (full), hashDeltaMove/hashDeltaPiece (incremental)
-│   │   │   ├── tt.go              # TranspositionTable: TTEntry (16 bytes: key, score int16, depth, flag, move uint16), Probe/Store/Clear/FillPercent/Size, PackMove/UnpackMove, DefaultTranspositionTable (4MB)
+│   │   │   ├── tt.go              # TranspositionTable: TTEntry (16 bytes: key, score int16, depth, flag, gen, move uint16), Probe/Store/Clear/FillPercent/Size, PackMove/UnpackMove, DefaultTranspositionTable (32MB), gen-aware replacement (gen+depth priority), TTEntrySize constant + TestTTEntrySize
 │   │   │   ├── perft.go           # Position.Perft(depth): recursive node count using Make/Unmake + stack-allocated MoveList per ply
 │   │   │   ├── legal_test.go      # Tests: FEN loading, castling rights, legal move counts, pins, en-passant discovered check, king-in-check
 │   │   │   ├── fen_test.go        # Tests: en passant target parsing, halfmove clock, fullmove number, squareToIndex, Make/Unmake clock management
 │   │   │   ├── status_test.go     # Tests: CurrentStatus, GameStatus.String/IsGameOver, statusFor
 │   │   │   ├── perft_test.go      # Tests: Perft on all 6 chessprogramming.org standard positions
 │   │   │   ├── zobrist_test.go    # Tests: incremental hash matches full recompute, hash uniqueness, side-to-move, promotion
+│   │   │   ├── tt_test.go         # Tests: TTEntry struct size stays 16 bytes (Gen field fits in padding)
 │   │   │   └── draw_test.go       # Tests: threefold repetition, insufficient material (KvK, KBvK, KNvK, KBvsKB same/diff color), 50-move rule, CurrentStatus draw
 │   │   └── ai/                    # Chess AI (pure Go, no JS deps except build-tagged clock)
 │   │       ├── ai.go              # Evaluate(p *Position): O(1) read of incremental EvalScore (negated for side to move) — material + PST maintained by Make/Unmake
-│   │       ├── types.go           # SearchResult, searchCtx (with tt *TranspositionTable, killers killerTable, history historyTable, disableNullMove bool), constants (winScore=30000, negInf=-32000, nodeCheckMask, maxDepth=32, maxPly=256), shouldStop() method
+│   │       ├── types.go           # SearchResult, searchCtx (with tt *TranspositionTable, gen uint8, killers killerTable, history historyTable, disableNullMove bool), constants (winScore=30000, negInf=-32000, nodeCheckMask, maxDepth=32, maxPly=256), genCounter (package-level uint8), shouldStop() method
 │   │       ├── moveorder.go       # sideColor, killerTable [maxPly][2]Move, historyTable [4096]int, moveOrderScore (previousBest + MVV + killers + history), orderMoves (insertion sort), noLegalMoveScore
-│   │       ├── search.go          # negamax (recursive core: TT probe + store, alpha-beta, null-move pruning, LMR, killer/history recording on cutoffs, mate score ply adjustment, repetition/50-move draw checks), scoreToTT/scoreFromTT, hasNonPawnMaterial
+│   │       ├── search.go          # negamax (recursive core: TT probe + store with gen, alpha-beta, null-move pruning, LMR, killer/history recording on cutoffs, mate score ply adjustment, repetition/50-move draw checks), scoreToTT/scoreFromTT, hasNonPawnMaterial
 │   │       ├── quiescence.go      # quiescence(): stand-pat + captures-only extension past depth 0 — prevents horizon effect
-│   │       ├── search_api.go      # Search() + SearchWithTT(), SearchFixedDepth() + SearchFixedDepthWithTT(), iterativeDeepening (aspiration windows from depth 3, history aging) — public entry points
+│   │       ├── search_api.go      # Search() + SearchWithTT(), SearchFixedDepth() + SearchFixedDepthWithTT(), nextGen() (gen counter increment + wraparound TT clear), iterativeDeepening (aspiration windows from depth 3, history aging) — public entry points
 │   │       ├── clock_wasm.go      # nowMs() via js.performance.now() — build tag: js && wasm
 │   │       ├── clock_native.go    # nowMs() via time.Now().UnixMilli() — build tag: !(js && wasm)
-│   │       └── ai_test.go         # Tests: evaluation, mate-in-1, mate-in-1-black, win hanging piece, search properties, depth scaling, NPS measurement, ID vs direct, benchmarks
+│   │       ├── ai_test.go         # Tests: evaluation, mate-in-1, mate-in-1-black, win hanging piece, search properties, depth scaling, NPS measurement, ID vs direct, benchmarks
+│   │       └── tt_fill_test.go   # Tests: TT fill % measurement (positions × time limits, per-depth), deep-entry preservation with gen-aware replacement
 │   ├── tools/main.go              # Type generator: Go AST + type-checker → wasm-contract.ts (optional, starting point only)
 │   ├── bin/gen-types.exe          # Compiled type generator binary
 │   ├── save-engine.ps1            # Builds UCI engine, saves timestamped copy to engines/ (for versioned testing)
@@ -132,7 +134,7 @@ my-stockfish/
 - Go engine handles: board representation, FEN loading (all 6 fields), move generation for all piece types, captures, en passant, pawn promotion, **castling**
 - **Position struct**: all game state in `Position` (Board, WhiteToMove, CastlingRights, EnPassant*, HalfmoveClock, FullmoveNumber, Hash, KingSquares, EvalScore, undoStack[maxPly], undoPly); a global `Game *Position` is used by the WASM bridge; the AI uses the same Position via `Make`/`Unmake`
 - **Zobrist hashing**: `[12][64]uint64` piece keys + side + castling + EP keys (fixed seed); `Hash` maintained incrementally in `Make`/`Unmake` via XOR; `ComputeHash()` for initial computation in `LoadFen`
-- **Transposition table**: 4MB default (256K entries × 16 bytes); `TTEntry{key, score int16, depth, flag, move uint16}`; always-replace strategy; `Probe`/`Store`/`Clear`/`FillPercent`; mate score ply adjustment (`scoreToTT`/`scoreFromTT`); TT move used for move ordering
+- **Transposition table**: 32MB default (2M entries × 16 bytes); `TTEntry{key, score int16, depth, flag, gen, move uint16}`; **gen-aware replacement** (gen+depth priority: recent shallow entries replace old deep ones, so entries from early moves decay as the game progresses); `Probe`/`Store`/`Clear`/`FillPercent`; mate score ply adjustment (`scoreToTT`/`scoreFromTT`); TT move used for move ordering; `Gen` field fits in struct padding (still 16 bytes)
 - **Incremental evaluation**: `EvalScore` (white material+PST minus black) maintained in `Make`/`Unmake`; `Evaluate()` is O(1) — single field read + side-to-move negation; PST tables moved to `pkg/engine/evaluate.go` for `Make` to access
 - **King square cache**: `KingSquares[2]` in Position, updated in `Make`/`Unmake`; `FindKing` is O(1) array read instead of 64-square scan
 - **Fixed undo stack**: `undoStack [maxPly]undoInfo` (256 entries, ~12KB) + `undoPly int`; zero heap allocation in search; `Ply()` method exposes ply for TT mate-score adjustment
@@ -156,6 +158,7 @@ my-stockfish/
 - **Result overlay**: "Brancas vencem!" / "Pretas vencem!" / "Empate!"
 - **AI setup panel**: user chooses their color (board auto-flips), search mode (difficulty / custom time / custom depth), and difficulty level (Fácil/Médio/Difícil)
 - **"IA pensando..." indicator**: badge in turn banner while AI searches
+- **Persistent WASM TT**: module-level `sharedTT` (32MB) reused across AI moves and analysis; cleared on `initBoard` (new game); entries accumulate across moves, improving hit rates for recurring positions (mirrors the UCI engine's session-level TT)
 - **Move history sidebar**: SAN-like notation (e4, Nf3, exd5, O-O, e8=Q+, O-O-O#) with move-pair rows; click any move to jump to that position; navigation buttons (|<, <, >, >|) for start/prev/next/end; auto-scrolls to current ply; per-move evaluation tags shown when analysis is available
 - **Position navigation**: viewing past positions does not trigger the AI or allow board interaction; making a new move is only possible from the latest position; a "revisitando" badge appears in the turn banner when viewing history
 - **Chess clock**: dual countdown (white/black) with configurable initial time (1/3/5/10/15 min or no clock) and increment (0/2/3/5/10s); clock starts on the first move; increment added after each move; flag fall → loss; clock config disabled during an active game
@@ -174,7 +177,7 @@ my-stockfish/
 - **Pseudo-legal moves + lazy `IsInCheck`**: one Make/Unmake per move (not two like LegalMoves would force); the AI uses `PseudoLegalMoves` directly, skipping `LegalMoves`
 - **MVV + killers + history move ordering**: captures sorted by `MaterialValue(captured)`; previousBest (ID hint) / TT move forced to index 0; killers (two `[maxPly][2]Move` slots per ply, quiet cutoff moves) at score 900; history (`[4096]int` indexed by `from*64+to`, depth² bonus + aging) for remaining quiet moves; insertion sort (optimal for ~20-40 moves, faster than `sort.Slice` with closure overhead)
 - **Quiescence search**: stand-pat + captures-only (`PseudoLegalCaptures`) at depth 0 — prevents horizon effect
-- **Transposition table**: Zobrist hash → 16-byte entry; always-replace; mate score ply adjustment; TT move for ordering
+- **Transposition table**: Zobrist hash → 16-byte entry; **gen-aware replacement** (gen+depth priority); mate score ply adjustment; TT move for ordering
 - **Null-move pruning**: "pass" once, search opponent at `depth-1-R` (R=2); if still ≥ beta, prune the subtree; guarded by `!inCheck && ply > 0 && depth > 3 && hasNonPawnMaterial && !ctx.disableNullMove`; inline hash/side flip (no Make call — restores manually); `ZobristSideKey` / `ZobristEPKeys` exported from engine for the flip
 - **Late move reductions (LMR)**: after 3 full-depth moves, remaining quiet non-killer non-promotion moves searched at `depth-2`; if reduced search beats alpha, re-search at full depth; skips captures, promotions, killers (those need full accuracy)
 - **Aspiration windows**: from depth 3, search with `[score-50, score+50]` instead of `[-inf, +inf]`; on fail-low (score ≤ alpha) widen downward, on fail-high (score ≥ beta) widen upward, re-search (TT makes it cheap); history aged between iterations
@@ -224,9 +227,9 @@ React component
 | `makeMove` | `makeMoveJS` | `engine.MakeMove(from, to, promotion)` | `number, number, number?` | `number[]` (64 board bytes) |
 | `isCheckJS` | `isCheckJS` | `engine.KingCheck()` | — | `number` (checked king's square index, or -1) |
 | `gameStatus` | `gameStatusJS` | `engine.CurrentStatus().String()` | — | `string` (`"playing"` \| `"white-wins"` \| `"black-wins"` \| `"draw"`) |
-| `aiMove` | `aiMoveJS` | `ai.Search(engine.Game, timeLimitMs, nil)` | `number` (time limit ms) | JSON string `{from, to, promotion?}` |
-| `aiMoveDepth` | `aiMoveDepthJS` | `ai.SearchFixedDepth(engine.Game, depth, nil)` | `number` (depth) | JSON string `{from, to, promotion?}` |
-| `aiAnalysis` | `aiAnalysisJS` | `ai.Search(engine.Game, timeLimitMs, nil)` | `number` (time limit ms) | JSON string `{from, to, promotion?, score, depth, nodes, timeMs}` |
+| `aiMove` | `aiMoveJS` | `ai.SearchWithTT(engine.Game, timeLimitMs, nil, sharedTT)` | `number` (time limit ms) | JSON string `{from, to, promotion?}` |
+| `aiMoveDepth` | `aiMoveDepthJS` | `ai.SearchFixedDepthWithTT(engine.Game, depth, nil, sharedTT)` | `number` (depth) | JSON string `{from, to, promotion?}` |
+| `aiAnalysis` | `aiAnalysisJS` | `ai.SearchWithTT(engine.Game, timeLimitMs, nil, sharedTT)` | `number` (time limit ms) | JSON string `{from, to, promotion?, score, depth, nodes, timeMs}` |
 
 ### Piece byte encoding (shared between Go and TS)
 
@@ -269,8 +272,9 @@ Keys generated with fixed seed (`0xCAFE`) for reproducibility — same hash acro
 TTEntry (16 bytes):
   Key   uint64  (8) — full Zobrist hash for collision verification
   Score int16   (2) — adjusted for mate distance (score ± ply)
-  Depth uint8   (1) — search depth when stored
+  Depth uint8   (1) — search depth when stored (used for probe validity)
   Flag  TTFlag  (1) — TTExact | TTLower | TTUpper
+  Gen   uint8   (1) — search generation when stored (used for replacement priority)
   Move  uint16  (2) — packed best move (from×1024 + to×4 + promoCode)
 
 TranspositionTable:
@@ -279,7 +283,7 @@ TranspositionTable:
   used    int        — slot fill counter
 ```
 
-`DefaultTranspositionTable()` = 4MB (256K entries). Always-replace strategy. `FillPercent()` tracks slot usage.
+`DefaultTranspositionTable()` = 32MB (2M entries). **Gen-aware replacement**: a new entry replaces an existing one if `gen + depth >= old.Gen + old.Depth`. The `gen` counter is a package-level `uint8` in `pkg/ai`, incremented before each `Search()`/`SearchFixedDepth()` call; on wraparound (255 → 0), the TT is cleared to keep comparisons monotonic. This ensures old deep entries from early moves (low gen) are naturally replaced by recent shallow entries (high gen) — entries from move 1's depth-12 search (priority 13) lose to move 20's depth-6 search (priority 26). `FillPercent()` tracks slot usage. Measured fill at 1s on starting position: ~9.5% (no thrashing).
 
 ### AI search architecture
 
@@ -330,7 +334,7 @@ Standalone CLI chess engine implementing the UCI protocol. Used for testing agai
 
 ### Features
 - Full UCI protocol: `uci`, `isready`, `ucinewgame`, `position [startpos|fen] [moves ...]`, `go [wtime|btime|winc|binc|movetime|depth|infinite]`, `stop`, `quit`
-- **Persistent TT**: 4MB transposition table reused across moves (cleared on `ucinewgame`); uses `SearchWithTT` / `SearchFixedDepthWithTT`
+- **Persistent TT**: 32MB transposition table reused across moves (cleared on `ucinewgame`); uses `SearchWithTT` / `SearchFixedDepthWithTT`; gen-aware replacement (old deep entries decay as the game progresses)
 - **Panic recovery**: search goroutine recovers from panics, sends a fallback legal move
 - **Fallback move**: if search returns empty (aborted/game over), picks the first legal move
 - **Stdout flush**: `os.Stdout.Sync()` after `bestmove` to avoid buffering issues with cutechess

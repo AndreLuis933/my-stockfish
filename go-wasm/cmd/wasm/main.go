@@ -55,7 +55,14 @@ func makeMoveJS(_ js.Value, args []js.Value) interface{} {
 
 //rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1
 
+// sharedTT is the persistent transposition table, reused across searches
+// within a game. Entries accumulate across moves (improving hit rates for
+// recurring positions) and are cleared on initBoard (new game). This mirrors
+// the UCI engine's session-level TT.
+var sharedTT = engine.DefaultTranspositionTable()
+
 func initBoardJs(_ js.Value, _ []js.Value) interface{} {
+	sharedTT.Clear()
 	engine.LoadFen(engine.StartingFEN)
 	return getBoard()
 }
@@ -66,7 +73,7 @@ func aiMoveJS(_ js.Value, args []js.Value) interface{} {
 	if len(args) > 0 && !args[0].IsUndefined() && args[0].Type() == js.TypeNumber {
 		timeLimitMs = args[0].Int()
 	}
-	result := ai.Search(engine.Game, timeLimitMs, nil)
+	result := ai.SearchWithTT(engine.Game, timeLimitMs, nil, sharedTT)
 	return moveToJSON(result.Move)
 }
 
@@ -77,7 +84,7 @@ func aiMoveDepthJS(_ js.Value, args []js.Value) interface{} {
 	if len(args) > 0 && !args[0].IsUndefined() && args[0].Type() == js.TypeNumber {
 		depth = args[0].Int()
 	}
-	result := ai.SearchFixedDepth(engine.Game, depth, nil)
+	result := ai.SearchFixedDepthWithTT(engine.Game, depth, nil, sharedTT)
 	return moveToJSON(result.Move)
 }
 
@@ -89,7 +96,7 @@ func aiAnalysisJS(_ js.Value, args []js.Value) interface{} {
 	if len(args) > 0 && !args[0].IsUndefined() && args[0].Type() == js.TypeNumber {
 		timeLimitMs = args[0].Int()
 	}
-	result := ai.Search(engine.Game, timeLimitMs, nil)
+	result := ai.SearchWithTT(engine.Game, timeLimitMs, nil, sharedTT)
 	return analysisToJSON(result)
 }
 

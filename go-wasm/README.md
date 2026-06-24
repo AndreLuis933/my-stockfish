@@ -20,7 +20,7 @@ The engine handles all chess logic for the browser app:
 - **Make/Unmake**: `Position.Make(move)` applies a move incrementally (board, hash, eval, king squares, castling, EP, clocks, side) and pushes undo info; `Position.Unmake(move)` reverses it in O(1) — no full board copy, the performance foundation for AI search
 - **Incremental evaluation**: `EvalScore` (white material+PST minus black) maintained in `Make`/`Unmake`; PST tables in `evaluate.go`
 - **Zobrist hashing**: `[12][64]uint64` piece keys + side + castling + EP keys (fixed seed); `Hash` maintained incrementally in `Make`/`Unmake` via XOR
-- **Transposition table**: 4MB default (256K entries × 16 bytes); `TTEntry{key, score int16, depth, flag, move uint16}`; always-replace; `Probe`/`Store`/`Clear`/`FillPercent`; `PackMove`/`UnpackMove`
+- **Transposition table**: 32MB default (2M entries × 16 bytes); `TTEntry{key, score int16, depth, flag, gen, move uint16}`; **gen-aware replacement** (gen+depth priority); `Probe`/`Store`/`Clear`/`FillPercent`; `PackMove`/`UnpackMove`
 - **King square cache**: `KingSquares[2]` in Position, updated in `Make`/`Unmake`; `FindKing` is O(1) array read
 - **Fixed undo stack**: `undoStack [maxPly]undoInfo` (256 entries) + `undoPly int`; zero heap allocation in search; `Ply()` method for TT mate-score adjustment
 - **Legal move filtering**: pseudo-legal moves filtered by Make/Unmake — pins, en-passant discovered checks, and king-moves-into-check handled automatically
@@ -35,7 +35,7 @@ Separate package with clean one-directional dependency (`pkg/ai` → `pkg/engine
 
 - **Evaluation**: O(1) read of incremental `EvalScore` (material + piece-square tables maintained by `Make`/`Unmake`), negated for side to move
 - **Search**: negamax + alpha-beta pruning + iterative deepening (IDDFS)
-- **Transposition table**: Zobrist hash → 16-byte entry; always-replace; mate score ply adjustment; TT move for ordering
+- **Transposition table**: Zobrist hash → 16-byte entry; **gen-aware replacement** (gen+depth priority); mate score ply adjustment; TT move for ordering
 - **Quiescence search**: stand-pat + captures-only (`PseudoLegalCaptures`) at depth 0 — prevents horizon effect
 - **Move ordering**: MVV (captures by `MaterialValue`) + previousBest/TT-move-to-front; insertion sort (optimal for ~20-40 moves)
 - **Pseudo-legal moves + lazy `IsInCheck`**: one Make/Unmake per move (not two like LegalMoves would force)
@@ -80,7 +80,7 @@ go-wasm/
 │   │   ├── status.go          # GameStatus enum + CurrentStatus(): checks IsDraw() + checkmate/stalemate
 │   │   ├── draw.go            # IsRepetition() (undo stack hash scan), IsTwoFoldRepetition(), IsFiftyMoveRule(), IsInsufficientMaterial() (zero-alloc), IsDraw()
 │   │   ├── zobrist.go         # Zobrist hashing: [12][64]uint64 piece keys + side + castling + EP keys (fixed seed), ComputeHash() (full), hashDeltaMove/hashDeltaPiece (incremental)
-│   │   ├── tt.go              # TranspositionTable: TTEntry (16 bytes), Probe/Store/Clear/FillPercent/Size, PackMove/UnpackMove, DefaultTranspositionTable (4MB)
+│   │   ├── tt.go              # TranspositionTable: TTEntry (16 bytes, Gen fits in padding), Probe/Store (gen+depth replacement)/Clear/FillPercent/Size, PackMove/UnpackMove, DefaultTranspositionTable (32MB), TTEntrySize + TestTTEntrySize
 │   │   ├── perft.go           # Perft(depth): recursive node count using Make/Unmake + stack MoveList per ply
 │   │   ├── legal_test.go      # Tests: FEN, castling rights, legal moves, pins, en passant, king-in-check
 │   │   ├── fen_test.go        # Tests: en passant target, halfmove clock, fullmove number, Make/Unmake clocks
@@ -199,8 +199,9 @@ Keys generated with fixed seed (`0xCAFE`) for reproducibility — same hash acro
 TTEntry (16 bytes):
   Key   uint64  (8) — full Zobrist hash for collision verification
   Score int16   (2) — adjusted for mate distance (score ± ply)
-  Depth uint8   (1) — search depth when stored
+  Depth uint8   (1) — search depth when stored (used for probe validity)
   Flag  TTFlag  (1) — TTExact | TTLower | TTUpper
+  Gen   uint8   (1) — search generation when stored (used for replacement priority)
   Move  uint16  (2) — packed best move (from×1024 + to×4 + promoCode)
 
 TranspositionTable:
@@ -209,7 +210,7 @@ TranspositionTable:
   used    int        — slot fill counter
 ```
 
-`DefaultTranspositionTable()` = 4MB (256K entries). Always-replace strategy. `FillPercent()` tracks slot usage.
+`DefaultTranspositionTable()` = 32MB (2M entries). **Gen-aware replacement**: a new entry replaces an existing one if `gen + depth >= old.Gen + old.Depth`. The `gen` counter is a package-level `uint8` in `pkg/ai`, incremented before each `Search()`/`SearchFixedDepth()` call; on wraparound (255 → 0), the TT is cleared. This ensures old deep entries from early moves (low gen) are naturally replaced by recent shallow entries (high gen) — entries from move 1's depth-12 search (priority 13) lose to move 20's depth-6 search (priority 26). `FillPercent()` tracks slot usage. Measured fill at 1s on starting position: ~9.5% (no thrashing).
 
 ---
 
@@ -231,7 +232,7 @@ pkg/types            ← Move, Piece, constants
 
 - **Negamax** with alpha-beta pruning (negation handles perspective switching — simpler than minimax with isMaximizing); returns `(score, bestMove)` — no separate root function
 - **Iterative deepening**: depth 1, 2, 3... until time budget expires; previous depth's best move searched first (improves cutoffs); aborted partial results discarded; used by `Search` (time-limited) and `SearchFixedDepth` (fallback on abort)
-- **Transposition table**: Zobrist hash → 16-byte entry; always-replace; mate score ply adjustment (`scoreToTT`/`scoreFromTT`); TT move used for move ordering
+- **Transposition table**: Zobrist hash → 16-byte entry; **gen-aware replacement** (gen+depth priority); mate score ply adjustment (`scoreToTT`/`scoreFromTT`); TT move used for move ordering
 - **Quiescence search**: at depth 0, instead of returning `Evaluate()`, search captures only until quiet (stand-pat + `PseudoLegalCaptures`); prevents horizon effect
 - **Pseudo-legal moves + lazy `IsInCheck`**: the AI uses `PseudoLegalMoves` directly, skipping `LegalMoves` — one Make/Unmake per move (not two)
 - **MVV move ordering**: captures sorted by `MaterialValue(captured)`; previousBest (ID hint) / TT move forced to index 0; insertion sort (optimal for ~20-40 moves)
@@ -303,7 +304,7 @@ Standalone CLI chess engine implementing the UCI protocol. Used for testing agai
 
 ### Features
 - Full UCI protocol: `uci`, `isready`, `ucinewgame`, `position [startpos|fen] [moves ...]`, `go [wtime|btime|winc|binc|movetime|depth|infinite]`, `stop`, `quit`
-- **Persistent TT**: 4MB transposition table reused across moves (cleared on `ucinewgame`); uses `SearchWithTT` / `SearchFixedDepthWithTT`
+- **Persistent TT**: 32MB transposition table reused across moves (cleared on `ucinewgame`); uses `SearchWithTT` / `SearchFixedDepthWithTT`; gen-aware replacement (old deep entries decay as the game progresses)
 - **Panic recovery**: search goroutine recovers from panics, sends a fallback legal move
 - **Fallback move**: if search returns empty (aborted/game over), picks the first legal move
 - **Stdout flush**: `os.Stdout.Sync()` after `bestmove` to avoid buffering issues with cutechess
