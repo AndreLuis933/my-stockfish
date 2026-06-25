@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"strings"
 	"unicode"
 
 	"webassemble/pkg/types"
@@ -40,4 +41,44 @@ func (p *Position) PrintBoard() {
 		}
 		fmt.Println()
 	}
+}
+
+// FenSnapshot returns a compact FEN string for the current position, for
+// logging/debug purposes only. Not optimized for hot paths.
+func (p *Position) FenSnapshot() string {
+	letters := map[types.Piece]byte{
+		types.Pawn: 'p', types.Knight: 'n', types.Bishop: 'b',
+		types.Rook: 'r', types.Queen: 'q', types.King: 'k',
+	}
+	var sb strings.Builder
+	for row := 0; row < 8; row++ {
+		empty := 0
+		for col := 0; col < 8; col++ {
+			piece := p.Board[row*8+col]
+			if piece == 0 {
+				empty++
+				continue
+			}
+			if empty > 0 {
+				sb.WriteByte(byte('0' + empty))
+				empty = 0
+			}
+			letter := letters[piece&types.TypeMask]
+			if piece&types.ColorMask == types.ColorWhite {
+				letter = byte(unicode.ToUpper(rune(letter)))
+			}
+			sb.WriteByte(letter)
+		}
+		if empty > 0 {
+			sb.WriteByte(byte('0' + empty))
+		}
+		if row < 7 {
+			sb.WriteByte('/')
+		}
+	}
+	side := "w"
+	if !p.WhiteToMove {
+		side = "b"
+	}
+	return fmt.Sprintf("%s %s - - %d %d", sb.String(), side, p.HalfmoveClock, p.FullmoveNumber)
 }

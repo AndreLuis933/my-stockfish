@@ -427,6 +427,7 @@ func searchCtxWithTT(timeLimitMs int) *searchCtx {
 		startTime:   nowMs(),
 		timeLimitMs: float64(timeLimitMs),
 		tt:          engine.DefaultTranspositionTable(),
+		gen:         1,
 	}
 }
 

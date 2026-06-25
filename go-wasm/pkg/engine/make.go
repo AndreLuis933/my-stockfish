@@ -2,11 +2,27 @@ package engine
 
 import "webassemble/pkg/types"
 
+// searchBudgetMargin is the ply headroom reserved for the AI search when
+// deciding to trim the real Game's undo stack in MakeMove. It covers the
+// worst-case search depth (maxDepth) plus check extensions and quiescence,
+// so the search always has room to run without hitting the ply guard.
+const searchBudgetMargin = 100
+
 // MakeMove applies a move (given as raw from/to/promotion) to the global Game.
 // Kept as a free function for the WASM bridge, which receives primitive args
 // from JavaScript. Internally it builds a Move and delegates to Make, which
 // reads the flag/captured fields set by the move generators.
 func MakeMove(from, to, promotion int) {
+	// Dynamic trim: keep the undo stack bounded so the AI search always has
+	// a full ply budget regardless of game length. Trims to HalfmoveClock+1
+	// (the full reversible-move window) so threefold repetition detection in
+	// the real game stays correct. Only fires on long games (200+ moves);
+	// normal games never reach this threshold. MakeMove is never called by
+	// the search, so this can never fire mid-search.
+	if Game.undoPly > maxPly-searchBudgetMargin {
+		Game.TrimUndoStack(Game.HalfmoveClock + 1)
+	}
+
 	piece := Game.Board[from]
 	move := types.Move{From: from, To: to}
 

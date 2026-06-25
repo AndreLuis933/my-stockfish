@@ -29,6 +29,13 @@ func quiescence(p *engine.Position, alpha, beta int, ctx *searchCtx) int {
 		return 0
 	}
 
+	// Hard ply limit: quiescence has no depth parameter, so without this
+	// guard a long capture chain can recurse past maxPly and overflow the
+	// undo stack in Make. Return the static eval as a safe fallback.
+	if p.Ply() >= maxPly {
+		return Evaluate(p)
+	}
+
 	// Threefold repetition: return draw before stand-pat, so a repeating
 	// position returns 0 instead of a stale winning eval. The 50-move rule
 	// is not checked here because quiescence doesn't detect mate anyway.

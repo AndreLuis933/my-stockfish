@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime"
 
 	"webassemble/pkg/ai"
 	"webassemble/pkg/engine"
@@ -33,13 +34,21 @@ func (s *uciSession) handleGo(parts []string) {
 		defer close(done)
 		defer func() {
 			if r := recover(); r != nil {
-				fmt.Fprintf(os.Stderr, "search panic: %v\n", r)
+				buf := make([]byte, 8192)
+				n := runtime.Stack(buf, false)
+				stack := string(buf[:n])
+				dbg("SEARCH PANIC: %v\n%s", r, stack)
+				fmt.Fprintf(os.Stderr, "search panic: %v\n%s\n", r, stack)
 				var ml engine.MoveList
-				searchPos.LegalMoves(&ml)
+				func() {
+					defer func() { _ = recover() }() // LegalMoves itself may panic
+					searchPos.LegalMoves(&ml)
+				}()
 				moveStr := "0000"
 				if ml.Len() > 0 {
 					moveStr = moveToUCI(ml.Get(0))
 				}
+				os.Stdout.WriteString("info string search panic recovered\n")
 				os.Stdout.WriteString("bestmove " + moveStr + "\n")
 				os.Stdout.Sync()
 			}
@@ -51,6 +60,8 @@ func (s *uciSession) handleGo(parts []string) {
 			result = ai.SearchWithTT(&searchPos, int(timeMs), stopCh, s.tt)
 		}
 		printInfo(result)
+		dbg("bestmove %s depth=%d score=%d nodes=%d time=%dms",
+			moveToUCI(result.Move), result.Depth, result.Score, result.Nodes, result.TimeMs)
 
 		moveStr := moveToUCI(result.Move)
 		if result.Move.From == 0 && result.Move.To == 0 {

@@ -111,6 +111,14 @@ func negamax(p *engine.Position, depth, alpha, beta int, ctx *searchCtx, previou
 
 	ply := p.Ply()
 
+	// Hard ply limit: the undo stack and killer table are sized maxPly
+	// (256). Deep searches with check extensions can exceed this, causing
+	// an out-of-bounds panic in Make. Stop recursing once we hit the limit
+	// — return the static evaluation as a safe fallback.
+	if ply >= maxPly {
+		return Evaluate(p), types.Move{}
+	}
+
 	// Threefold repetition must be checked BEFORE the TT probe.
 	// Without this, a position that is already a draw by repetition can
 	// return a stale winning score from the TT (stored before the position
@@ -317,7 +325,7 @@ func negamax(p *engine.Position, depth, alpha, beta int, ctx *searchCtx, previou
 		case best >= beta:
 			flag = ttLower
 		}
-		ctx.tt.Store(p.Hash, uint8(depth), scoreToTT(best, ply), engine.PackMove(bestMove), engine.TTFlag(flag))
+		ctx.tt.Store(p.Hash, uint8(depth), ctx.gen, scoreToTT(best, ply), engine.PackMove(bestMove), engine.TTFlag(flag))
 	}
 
 	return best, bestMove

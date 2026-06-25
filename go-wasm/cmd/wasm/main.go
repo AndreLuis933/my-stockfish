@@ -53,8 +53,6 @@ func makeMoveJS(_ js.Value, args []js.Value) interface{} {
 	return getBoard()
 }
 
-//rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1
-
 // sharedTT is the persistent transposition table, reused across searches
 // within a game. Entries accumulate across moves (improving hit rates for
 // recurring positions) and are cleared on initBoard (new game). This mirrors

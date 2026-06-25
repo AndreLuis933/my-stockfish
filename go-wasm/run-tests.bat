@@ -11,7 +11,7 @@ REM ============================================================
 
 set "ENGINES_DIR=%~dp0engines"
 set "RESULTS_DIR=%~dp0results"
-set "OPENINGS=%ENGINES_DIR%\aberturas.epd"
+set "OPENINGS=%ENGINES_DIR%\openings.epd"
 set "REF_NAME=v3"
 
 REM Pick the candidate engine: arg1 if provided, else v4.exe
@@ -56,18 +56,38 @@ echo ============================================ >> "%SUMMARY%"
 echo. >> "%SUMMARY%"
 
 REM Common cutechess flags
-set "COMMON=-each proto=uci tc=5+1 -rounds 100 -concurrency 4 -openings file=%OPENINGS% format=epd order=random -draw movenumber=30 movecount=8 score=20 -recover"
+REM   -draw           : relaxed — only adjudicate after move 80 with 10 plies
+REM                    within +/-10cp. Lets games play out more naturally so we
+REM                    see real wins/losses instead of early dead-draw cutoffs.
+REM   -recover         : restart an engine that crashed/disconnected for the
+REM                    next game (cutechess re-launches the process).
+REM   stderr=          : each engine's stderr (Go panic output) is redirected
+REM                    to a separate file in results\ so we can see exactly
+REM                    what crashed. cutechess's own -debug flag is broken in
+REM                    1.5.1 (warns "Empty value"), so we use stderr= instead.
+set "COMMON=-each proto=uci tc=5+1 -rounds 12 -concurrency 4 -openings file=%OPENINGS% format=epd order=random -draw movenumber=80 movecount=10 score=10 -recover"
+
+REM Per-engine stderr files — capture Go panic stack traces
+set "CAND_STDERR=%RESULTS_DIR%\%CAND_NAME%-stderr-%STAMP%.log"
+set "REF_STDERR=%RESULTS_DIR%\%REF_NAME%-stderr-%STAMP%.log"
 
 echo.
 echo === Match: %CAND_NAME% vs %REF_NAME% ===
-cutechess-cli -engine name=%CAND_NAME% cmd="%CANDIDATE%" -engine name=%REF_NAME% cmd="%ENGINES_DIR%\%REF_NAME%.exe" %COMMON% -pgnout "%PGN%" > "%LOG%" 2>&1
+echo Stderr logs:
+echo   %CAND_NAME%: %CAND_STDERR%
+echo   %REF_NAME%:   %REF_STDERR%
+echo.
+cutechess-cli -engine name=%CAND_NAME% cmd="%CANDIDATE%" stderr="%CAND_STDERR%" -engine name=%REF_NAME% cmd="%ENGINES_DIR%\%REF_NAME%.exe" stderr="%REF_STDERR%" %COMMON% -pgnout "%PGN%" > "%LOG%" 2>&1
 type "%LOG%"
 call :parseScore "%LOG%" %CAND_NAME% %REF_NAME%
 echo %CAND_NAME% vs %REF_NAME% : !SCORE_LINE! >> "%SUMMARY%"
 
 echo. >> "%SUMMARY%"
-echo PGN:  %PGN% >> "%SUMMARY%"
-echo Log:  %LOG% >> "%SUMMARY%"
+echo PGN:         %PGN% >> "%SUMMARY%"
+echo Log:         %LOG% >> "%SUMMARY%"
+echo Stderr logs: >> "%SUMMARY%"
+echo   %CAND_NAME%: %CAND_STDERR% >> "%SUMMARY%"
+echo   %REF_NAME%:   %REF_STDERR% >> "%SUMMARY%"
 echo. >> "%SUMMARY%"
 REM To compute ELO + LOS after installing bayeselo:
 REM bayeselo %RESULTS_DIR%\*.pgn
@@ -78,8 +98,11 @@ echo  Match complete. Summary:
 echo ============================================
 type "%SUMMARY%"
 echo.
-echo PGN:  %PGN%
-echo Log:  %LOG%
+echo PGN:         %PGN%
+echo Log:         %LOG%
+echo Stderr logs:
+echo   %CAND_NAME%: %CAND_STDERR%
+echo   %REF_NAME%:   %REF_STDERR%
 echo.
 endlocal
 goto :eof

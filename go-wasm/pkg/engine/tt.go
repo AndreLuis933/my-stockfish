@@ -21,11 +21,17 @@ const (
 // per line). The key is the full 64-bit Zobrist hash for collision verification.
 // Score is stored as int16 (adjusted for mate distance at store time).
 // Move is packed as from(6) | to(6) | promo(4) = 16 bits.
+// Gen is the search generation when the entry was stored — used for replacement
+// priority (gen + depth): recent shallow entries can replace old deep ones so
+// entries from early moves decay as the game progresses. It fits in the struct
+// padding between Flag and Move (Move needs 2-byte alignment), so adding it
+// does not increase the struct size beyond 16 bytes.
 type TTEntry struct {
 	Key   uint64
 	Score int16
 	Depth uint8
 	Flag  TTFlag
+	Gen   uint8
 	Move  uint16
 }
 
@@ -109,10 +115,11 @@ func NewTranspositionTable(sizeBytes int) *TranspositionTable {
 	}
 }
 
-// DefaultTranspositionTable returns a 4MB TT (256K entries). Smaller than the
-// theoretical ideal but allocates fast enough for short time controls.
+// DefaultTranspositionTable returns a 32MB TT (2M entries). Sized so a 1s
+// search (~850K stores) fills ~42% of slots — deep entries from the final
+// iteration survive without being evicted by shallow leaf nodes.
 func DefaultTranspositionTable() *TranspositionTable {
-	return NewTranspositionTable(4 * 1024 * 1024)
+	return NewTranspositionTable(32 * 1024 * 1024)
 }
 
 // Probe returns the entry for the given hash, or ok=false if no entry
@@ -125,18 +132,37 @@ func (tt *TranspositionTable) Probe(hash uint64) (TTEntry, bool) {
 	return *entry, true
 }
 
-// Store writes an entry. Always-replace: overwrites whatever is in the slot.
-// If the slot was empty (Flag==TTNone), increments the used counter.
-func (tt *TranspositionTable) Store(hash uint64, depth uint8, score int16, move uint16, flag TTFlag) {
+// Store writes an entry with gen-aware replacement priority. The replacement
+// key is gen + depth: a new entry replaces an existing one if its gen+depth is
+// greater than or equal to the old entry's gen+depth. This ensures that:
+//   - Within a single search, deeper entries (higher depth, same gen) survive
+//     over shallow leaf nodes — they're expensive to recompute and frequently
+//     probed.
+//   - Across moves, old deep entries from early moves (low gen) decay as the
+//     game progresses — a recent shallow entry (high gen) can replace an old
+//     deep entry (low gen) because the old position is no longer reachable.
+//
+// The gen counter is per-search (incremented in pkg/ai before each Search call).
+// On wraparound (255 → 0), the caller must clear the TT to keep comparisons
+// monotonic within each epoch.
+func (tt *TranspositionTable) Store(hash uint64, depth uint8, gen uint8, score int16, move uint16, flag TTFlag) {
 	idx := hash & tt.mask
-	if tt.entries[idx].Flag == TTNone {
+	old := &tt.entries[idx]
+	if old.Flag == TTNone {
 		tt.used++
+	} else {
+		oldPriority := int(old.Gen) + int(old.Depth)
+		newPriority := int(gen) + int(depth)
+		if newPriority < oldPriority {
+			return
+		}
 	}
-	tt.entries[idx] = TTEntry{
+	*old = TTEntry{
 		Key:   hash,
 		Score: score,
 		Depth: depth,
 		Flag:  flag,
+		Gen:   gen,
 		Move:  move,
 	}
 }
@@ -163,3 +189,9 @@ func (tt *TranspositionTable) FillPercent() float64 {
 func (tt *TranspositionTable) Size() int {
 	return len(tt.entries)
 }
+
+// TTEntrySize is the size of a TTEntry in bytes. The entry must stay at 16 bytes
+// (4 per 64-byte cache line) — the Gen field fits in the natural padding between
+// Flag and Move without increasing the struct size. This constant documents the
+// invariant and lets a test assert it.
+const TTEntrySize = 16

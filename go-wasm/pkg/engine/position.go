@@ -34,7 +34,7 @@ type Position struct {
 	undoPly   int
 }
 
-const maxPly = 256
+const maxPly = 512
 
 // undoInfo holds exactly what Make overwrites, so Unmake can restore it.
 // Storing the pre-move values here means we don't need to recompute them.
@@ -59,6 +59,20 @@ var Game = &Position{
 }
 
 func (p *Position) Ply() int { return p.undoPly }
+
+// TrimUndoStack keeps only the last n entries of the undo stack and resets
+// undoPly to n. This is used by the AI search to start with a near-full
+// 256-ply budget regardless of game length, while keeping enough recent
+// history for short-cycle repetition detection (perpetual checks, shuffles).
+// If the stack already has n or fewer entries, this is a no-op.
+func (p *Position) TrimUndoStack(n int) {
+	if p.undoPly <= n {
+		return
+	}
+	offset := p.undoPly - n
+	copy(p.undoStack[:n], p.undoStack[offset:p.undoPly])
+	p.undoPly = n
+}
 
 // reset empties the position (used by tests and before LoadFen).
 func (p *Position) reset() {

@@ -8,7 +8,7 @@
 - TT + quiescence + killers + history + null-move pruning + LMR + aspiration
 
 ## Phase 1 — Search quality (biggest elo gain) ✅ DONE
-1. ✅ **Transposition table** — Zobrist hash → 4MB TT, mate-score ply adjustment
+1. ✅ **Transposition table** — Zobrist hash → 32MB TT, gen-aware replacement (gen+depth priority), mate-score ply adjustment
 2. ✅ **Quiescence search** — stand-pat + captures-only past depth 0
 3. ✅ **Killer moves + history heuristic** — two [256]Move slots per ply +
    [4096]int history table with depth² bonus and aging

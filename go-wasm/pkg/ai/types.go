@@ -8,8 +8,8 @@ import (
 const (
 	winScore      = 30_000
 	nodeCheckMask = 2047
-	maxDepth      = 32
-	maxPly        = 256
+	maxDepth      = 64
+	maxPly        = 512
 	negInf        = -32_000
 )
 
@@ -22,6 +22,13 @@ type SearchResult struct {
 	TimeMs int64
 }
 
+// genCounter is a package-level search generation counter, incremented before
+// each Search/SearchFixedDepth call. It is passed to TT.Store so that
+// replacement priority (gen + depth) reflects recency: old deep entries from
+// early moves decay as the game progresses. On wraparound (255 → 0), the
+// caller clears the TT to keep comparisons monotonic within each epoch.
+var genCounter uint8
+
 // searchCtx tracks time, node count, abort state, TT, and move-ordering
 // heuristics (killers + history) across the recursion. The killer and history
 // tables are per-search (cleared at the start of each iterative-deepening
@@ -33,6 +40,7 @@ type searchCtx struct {
 	aborted     bool
 	stopCh      <-chan struct{}
 	tt          *engine.TranspositionTable
+	gen         uint8
 	killers     killerTable
 	history     historyTable
 	// disableNullMove turns off null-move pruning. Used by tests to A/B
