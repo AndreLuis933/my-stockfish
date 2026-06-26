@@ -1,7 +1,10 @@
 import { useEffect, useRef } from "react";
 import { formatClock } from "@/hooks/useChessClock";
+import { Figurine } from "@/components/Figurine/Figurine";
 import type { AiAnalysisResult } from "@/wasm/generated/wasm-contract";
 import type { ChessColor } from "@/types/chess";
+import { formatEval } from "@/utils/chessAnalysis";
+import { parseSanFigurine } from "@/utils/chessFigurine";
 import styles from "./MoveHistory.module.css";
 
 export interface HistoryEntry {
@@ -9,12 +12,6 @@ export interface HistoryEntry {
   color: ChessColor;
   analysis?: AiAnalysisResult | null;
 }
-
-const formatScore = (score: number): string => {
-  const pawns = score / 100;
-  const sign = pawns >= 0 ? "+" : "";
-  return `${sign}${pawns.toFixed(2)}`;
-};
 
 interface MoveHistoryProps {
   history: HistoryEntry[];
@@ -30,11 +27,27 @@ interface MoveHistoryProps {
 }
 
 const NAV_BUTTONS = [
-  { delta: -Infinity, label: "|<", title: "Início" },
-  { delta: -1, label: "<", title: "Anterior" },
-  { delta: 1, label: ">", title: "Próximo" },
-  { delta: Infinity, label: ">|", title: "Fim" },
+  { delta: -Infinity, label: "|◀", title: "Início" },
+  { delta: -1, label: "◀", title: "Anterior" },
+  { delta: 1, label: "▶", title: "Próximo" },
+  { delta: Infinity, label: "▶|", title: "Fim" },
 ] as const;
+
+const renderMoveText = (san: string, color: ChessColor): React.ReactNode => {
+  const { pieceType, rest } = parseSanFigurine(san);
+  return (
+    <>
+      {pieceType && (
+        <Figurine
+          type={pieceType}
+          color={color}
+          className={styles.moveFigurine}
+        />
+      )}
+      <span className={styles.moveText}>{rest}</span>
+    </>
+  );
+};
 
 export const MoveHistory = ({
   history,
@@ -81,24 +94,26 @@ export const MoveHistory = ({
 
   return (
     <div className={styles.sidebar}>
-      <div className={styles.clocksRow}>
-        <div
-          className={`${styles.clockCard} ${activeColor === "black" ? styles.clockActive : ""} ${flagFallen === "black" ? styles.clockFlagged : ""}`}
-        >
-          <span className={styles.clockDotBlack} />
-          <span className={`${styles.clockTime} ${blackLow ? styles.clockLow : ""}`}>
-            {formatClock(clocks.black)}
-          </span>
+      {clockEnabled && (
+        <div className={styles.clocksRow}>
+          <div
+            className={`${styles.clockCard} ${activeColor === "black" ? styles.clockActive : ""} ${flagFallen === "black" ? styles.clockFlagged : ""}`}
+          >
+            <span className={styles.clockDotBlack} />
+            <span className={`${styles.clockTime} ${blackLow ? styles.clockLow : ""}`}>
+              {formatClock(clocks.black)}
+            </span>
+          </div>
+          <div
+            className={`${styles.clockCard} ${activeColor === "white" ? styles.clockActive : ""} ${flagFallen === "white" ? styles.clockFlagged : ""}`}
+          >
+            <span className={styles.clockDotWhite} />
+            <span className={`${styles.clockTime} ${whiteLow ? styles.clockLow : ""}`}>
+              {formatClock(clocks.white)}
+            </span>
+          </div>
         </div>
-        <div
-          className={`${styles.clockCard} ${activeColor === "white" ? styles.clockActive : ""} ${flagFallen === "white" ? styles.clockFlagged : ""}`}
-        >
-          <span className={styles.clockDotWhite} />
-          <span className={`${styles.clockTime} ${whiteLow ? styles.clockLow : ""}`}>
-            {formatClock(clocks.white)}
-          </span>
-        </div>
-      </div>
+      )}
 
       <div className={styles.historyHeader}>
         <span className={styles.historyTitle}>Lances</span>
@@ -119,7 +134,7 @@ export const MoveHistory = ({
       <div className={styles.moveList} ref={listRef}>
         <button
           data-ply={0}
-          className={`${styles.moveCell} ${styles.startCell} ${currentPly === 0 ? styles.moveCellActive : ""}`}
+          className={`${styles.moveCell} ${styles.startCell} ${currentPly === 0 ? styles.startCellActive : ""}`}
           onClick={() => onJump(0)}
         >
           Início
@@ -135,10 +150,12 @@ export const MoveHistory = ({
                 className={`${styles.moveCell} ${currentPly === whitePly ? styles.moveCellActive : ""}`}
                 onClick={() => onJump(whitePly)}
               >
-                <span>{row.white?.san ?? ""}</span>
+                {row.white && renderMoveText(row.white.san, "white")}
                 {row.white?.analysis && (
-                  <span className={styles.evalTag}>
-                    {formatScore(row.white.analysis.score)}
+                  <span
+                    className={`${styles.evalTag} ${row.white.analysis.score < 0 ? styles.evalTagNegative : ""}`}
+                  >
+                    {formatEval(row.white.analysis.score)}
                   </span>
                 )}
               </button>
@@ -146,11 +163,14 @@ export const MoveHistory = ({
                 data-ply={blackPly}
                 className={`${styles.moveCell} ${currentPly === blackPly ? styles.moveCellActive : ""}`}
                 onClick={() => onJump(blackPly)}
+                disabled={!row.black}
               >
-                <span>{row.black?.san ?? ""}</span>
+                {row.black && renderMoveText(row.black.san, "black")}
                 {row.black?.analysis && (
-                  <span className={styles.evalTag}>
-                    {formatScore(row.black.analysis.score)}
+                  <span
+                    className={`${styles.evalTag} ${row.black.analysis.score < 0 ? styles.evalTagNegative : ""}`}
+                  >
+                    {formatEval(row.black.analysis.score)}
                   </span>
                 )}
               </button>

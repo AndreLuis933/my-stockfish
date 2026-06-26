@@ -8,6 +8,8 @@ export interface WasmContract {
   aiMove: { args: [number]; return: string };
   aiMoveDepth: { args: [number]; return: string };
   aiAnalysis: { args: [number]; return: string };
+  aiMultiPv: { args: [number, number]; return: string };
+  fen: { args: []; return: string };
 }
 ;
 
@@ -20,6 +22,21 @@ export interface AiAnalysisResult {
   nodes: number;
   timeMs: number;
 }
+
+export interface PvMove {
+  from: number;
+  to: number;
+  promotion?: number;
+}
+
+export interface MultiPvLine {
+  moves: PvMove[];
+  score: number;
+  depth: number;
+  nodes: number;
+  timeMs: number;
+}
+
 export type WasmFunctionName = keyof WasmContract;
 
 export type WasmEngine = {

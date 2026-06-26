@@ -71,6 +71,55 @@ func TestLoadFenMissingTrailingFields(t *testing.T) {
 	}
 }
 
+// TestFENRoundTrip verifies Position.FEN() produces a string that reloads to
+// the same state (board, side, castling, en passant, clocks).
+func TestFENRoundTrip(t *testing.T) {
+	cases := []string{
+		"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+		"rnbqkbnr/pppp1ppp/8/4p3/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+		"rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR b KQkq d6 0 1",
+		"rnbqkbnr/ppp1pppp/8/3p4/8/8/PPPPPPPP/RNBQKBNR w KQkq d3 0 2",
+		"r1bqkbnr/pppp1ppp/2n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3",
+		"4k3/8/8/8/8/8/8/4K2R w K - 5 10",
+		"rnbqkbnr/ppp1pppp/8/3p4/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 2",
+	}
+	for _, fen := range cases {
+		t.Run(fen, func(t *testing.T) {
+			loadFEN(t, fen)
+			out := Game.FEN()
+			loadFEN(t, out)
+			out2 := Game.FEN()
+			if out != out2 {
+				t.Errorf("FEN round-trip not stable:\n  in:  %s\n  out: %s\n  out2:%s", fen, out, out2)
+			}
+		})
+	}
+}
+
+// TestFENCastlingRights verifies all castling-rights combinations serialize
+// correctly.
+func TestFENCastlingRights(t *testing.T) {
+	cases := []struct {
+		rights types.CastlingRights
+		want   string
+	}{
+		{types.CastleWhiteK, "K"},
+		{types.CastleWhiteQ, "Q"},
+		{types.CastleBlackK, "k"},
+		{types.CastleBlackQ, "q"},
+		{types.CastleWhiteAll | types.CastleBlackAll, "KQkq"},
+		{0, "-"},
+	}
+	for _, c := range cases {
+		loadFEN(t, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
+		Game.CastlingRights = c.rights
+		got := Game.castlingString()
+		if got != c.want {
+			t.Errorf("castlingString(0x%x) = %q, want %q", c.rights, got, c.want)
+		}
+	}
+}
+
 func TestSquareToIndex(t *testing.T) {
 	cases := []struct {
 		square string

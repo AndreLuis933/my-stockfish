@@ -10,8 +10,9 @@ import {
 } from "@/utils/chessNotation";
 import type { ClockConfig, UseChessClock } from "@/hooks/useChessClock";
 import { useChessClock } from "@/hooks/useChessClock";
-import type { WasmEngine, AiAnalysisResult } from "@/wasm/generated/wasm-contract";
+import type { WasmEngine, AiAnalysisResult, MultiPvLine } from "@/wasm/generated/wasm-contract";
 import { useWasm } from "@/wasm/useWasm";
+import { pvToSan, type PvSanEntry } from "@/utils/pvToSan";
 
 export type ChessGameMode = "human-vs-ai" | "human-vs-human" | "ai-vs-ai" | "analysis";
 export type ChessResult = "white-wins" | "black-wins" | "draw" | null;
@@ -204,6 +205,13 @@ export interface UseChessReturn {
   analysisForPly: (ply: number) => AiAnalysisResult | null | undefined;
   exportPgn: () => string;
   loadPgn: (pgn: string) => Promise<boolean>;
+  multiPv: MultiPvLine[];
+  multiPvSan: PvSanEntry[][];
+  multiPvDepth: number;
+  multiPvThinking: boolean;
+  currentFen: string;
+  runMultiPv: (numLines: number, timeMs: number) => void;
+  stopMultiPv: () => void;
 }
 
 export const useChess = (
@@ -594,6 +602,73 @@ export const useChess = (
     });
   }, [engine, analyze, currentPly]);
 
+  // ── Multi-PV continuous analysis (lichess-style live deepening) ──
+  const [multiPv, setMultiPv] = useState<MultiPvLine[]>([]);
+  const [multiPvThinking, setMultiPvThinking] = useState(false);
+  const multiPvRef = useRef<{ cancelled: boolean } | null>(null);
+
+  const multiPvSan = useMemo<PvSanEntry[][]>(() => {
+    if (multiPv.length === 0) return [];
+    const board = state.board.slice();
+    const startColor: ChessColor = state.currentPlayer;
+    return multiPv.map((line) => pvToSan(board, line.moves, startColor));
+  }, [multiPv, state.board, state.currentPlayer]);
+
+  const multiPvDepth = multiPv.length > 0 ? Math.max(...multiPv.map((l) => l.depth)) : 0;
+
+  // Continuous Multi-PV loop: runs while in analysis mode, re-searches the
+  // current position repeatedly so depth/score update live. Stops on
+  // navigation, mode change, or unmount.
+  const runMultiPv = useCallback(
+    (numLines: number, timeMs: number) => {
+      if (!engine) return;
+      if (multiPvRef.current) multiPvRef.current.cancelled = true;
+      const token = { cancelled: false };
+      multiPvRef.current = token;
+      const currentEngine = engine;
+
+      setMultiPvThinking(true);
+      setMultiPv([]);
+
+      async function loop() {
+        while (!token.cancelled) {
+          const json = await currentEngine.aiMultiPv(timeMs, numLines);
+          if (token.cancelled) break;
+          const lines = JSON.parse(json) as MultiPvLine[];
+          setMultiPv(lines);
+        }
+        if (!token.cancelled) {
+          setMultiPvThinking(false);
+        }
+      }
+      loop();
+    },
+    [engine],
+  );
+
+  const stopMultiPv = useCallback(() => {
+    if (multiPvRef.current) {
+      multiPvRef.current.cancelled = true;
+      multiPvRef.current = null;
+    }
+    setMultiPvThinking(false);
+  }, []);
+
+  // ── Current FEN (live, from the engine) ──
+  const [currentFen, setCurrentFen] = useState("");
+
+  useEffect(() => {
+    if (!engine) return;
+    let cancelled = false;
+    const currentEngine = engine;
+    async function fetchFen() {
+      const fen = await currentEngine.fen();
+      if (!cancelled) setCurrentFen(fen);
+    }
+    fetchFen();
+    return () => { cancelled = true; };
+  }, [engine, state.board, currentPly]);
+
   // ── Export PGN of the current game ─────────────────────
   const exportPgn = useCallback((): string => {
     return historyToPgn(history, state.result);
@@ -751,6 +826,13 @@ export const useChess = (
       analysisForPly,
       exportPgn,
       loadPgn,
+      multiPv,
+      multiPvSan,
+      multiPvDepth,
+      multiPvThinking,
+      runMultiPv,
+      stopMultiPv,
+      currentFen,
     }),
     [
       state,
@@ -770,6 +852,13 @@ export const useChess = (
       analysisForPly,
       exportPgn,
       loadPgn,
+      multiPv,
+      multiPvSan,
+      multiPvDepth,
+      multiPvThinking,
+      runMultiPv,
+      stopMultiPv,
+      currentFen,
     ],
   );
 

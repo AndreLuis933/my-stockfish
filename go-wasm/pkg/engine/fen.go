@@ -137,6 +137,90 @@ func (p *Position) LoadFen(fen string) {
 	p.Hash = p.ComputeHash()
 }
 
+// indexToSquare converts a board index (0-63) to algebraic notation (e.g. "e4").
+// Inverse of squareToIndex.
+func indexToSquare(index int) string {
+	if index < 0 || index > 63 {
+		return "-"
+	}
+	file := byte('a' + (index % 8))
+	rank := byte('1' + (7 - index/8))
+	return string([]byte{file, rank})
+}
+
+// castlingString builds the FEN castling-rights field from the bitmask.
+// Order is always KQkq (white kingside, white queenside, black kingside,
+// black queenside); "-" if no rights.
+func (p *Position) castlingString() string {
+	var sb strings.Builder
+	if p.CastlingRights&types.CastleWhiteK != 0 {
+		sb.WriteByte('K')
+	}
+	if p.CastlingRights&types.CastleWhiteQ != 0 {
+		sb.WriteByte('Q')
+	}
+	if p.CastlingRights&types.CastleBlackK != 0 {
+		sb.WriteByte('k')
+	}
+	if p.CastlingRights&types.CastleBlackQ != 0 {
+		sb.WriteByte('q')
+	}
+	if sb.Len() == 0 {
+		return "-"
+	}
+	return sb.String()
+}
+
+// FEN returns the standard 6-field FEN string for the current position.
+// All fields are emitted: piece placement, side to move, castling rights,
+// en passant target, halfmove clock, fullmove number.
+//
+// Board layout: index 0 = a8 (row 0 = rank 8 in our convention is WRONG —
+// actually row 0 = rank 1 because LoadFen maps FEN rank 8 to targetRank=7).
+// FEN requires rank 8 first, so we iterate rows from 7 down to 0.
+func (p *Position) FEN() string {
+	letters := map[types.Piece]byte{
+		types.Pawn: 'p', types.Knight: 'n', types.Bishop: 'b',
+		types.Rook: 'r', types.Queen: 'q', types.King: 'k',
+	}
+	var sb strings.Builder
+	for row := 7; row >= 0; row-- {
+		empty := 0
+		for col := 0; col < 8; col++ {
+			piece := p.Board[row*8+col]
+			if piece == 0 {
+				empty++
+				continue
+			}
+			if empty > 0 {
+				sb.WriteByte(byte('0' + empty))
+				empty = 0
+			}
+			letter := letters[piece&types.TypeMask]
+			if piece&types.ColorMask == types.ColorWhite {
+				letter = byte(unicode.ToUpper(rune(letter)))
+			}
+			sb.WriteByte(letter)
+		}
+		if empty > 0 {
+			sb.WriteByte(byte('0' + empty))
+		}
+		if row > 0 {
+			sb.WriteByte('/')
+		}
+	}
+	side := "w"
+	if !p.WhiteToMove {
+		side = "b"
+	}
+	ep := "-"
+	if p.EnPassantTarget >= 0 {
+		ep = indexToSquare(p.EnPassantTarget)
+	}
+	return sb.String() + " " + side + " " + p.castlingString() + " " + ep +
+		" " + strconv.Itoa(p.HalfmoveClock) + " " + strconv.Itoa(p.FullmoveNumber)
+}
+
 // squareToIndex converts algebraic notation (e.g. "e4", "d6") to a board
 // index (0-63), or returns -1 if the string is invalid.
 //

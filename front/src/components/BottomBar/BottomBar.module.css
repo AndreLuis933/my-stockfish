@@ -1,0 +1,84 @@
+.bar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  background: #111114;
+  border-radius: 10px;
+  color: #cfcfcf;
+  font-size: 12px;
+}
+
+.fieldGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fieldLabel {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #777;
+}
+
+.fieldRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fieldInput {
+  flex: 1;
+  background: #1a1a1e;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: #e8e8e8;
+  font-family: "Courier New", monospace;
+  font-size: 12px;
+  outline: none;
+}
+
+.fieldInput:focus {
+  border-color: rgba(95, 255, 170, 0.3);
+}
+
+.fieldInputTextarea {
+  resize: vertical;
+  min-height: 48px;
+  max-height: 120px;
+  line-height: 1.4;
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.controlBtn {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 5px;
+  color: #aaa;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 4px 8px;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.controlBtn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ddd;
+}
+
+.controlBtn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.menuBtn {
+  margin-left: 4px;
+}

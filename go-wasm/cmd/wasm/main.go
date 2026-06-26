@@ -126,6 +126,70 @@ func analysisToJSON(result ai.SearchResult) interface{} {
 	return js.ValueOf(string(raw))
 }
 
+// pvMoveJSON is the JSON shape for a single move in a Multi-PV line. Matches
+// the frontend MoveData contract: {from, to, promotion?}.
+type pvMoveJSON struct {
+	From      int  `json:"from"`
+	To        int  `json:"to"`
+	Promotion *int `json:"promotion,omitempty"`
+}
+
+// multiPvLineJSON is one line of a Multi-PV result.
+type multiPvLineJSON struct {
+	Moves  []pvMoveJSON `json:"moves"`
+	Score  int         `json:"score"`
+	Depth  int         `json:"depth"`
+	Nodes  int         `json:"nodes"`
+	TimeMs int64       `json:"timeMs"`
+}
+
+// aiMultiPvJS runs a time-limited Multi-PV search and returns numLines
+// principal variations as JSON. Used by the analysis panel to show multiple
+// candidate lines ranked by eval.
+func aiMultiPvJS(_ js.Value, args []js.Value) interface{} {
+	timeLimitMs := 1000
+	if len(args) > 0 && !args[0].IsUndefined() && args[0].Type() == js.TypeNumber {
+		timeLimitMs = args[0].Int()
+	}
+	numLines := 3
+	if len(args) > 1 && !args[1].IsUndefined() && args[1].Type() == js.TypeNumber {
+		numLines = args[1].Int()
+	}
+	lines := ai.SearchMultiPV(engine.Game, timeLimitMs, numLines, nil, sharedTT)
+
+	out := make([]multiPvLineJSON, 0, len(lines))
+	for _, line := range lines {
+		moves := make([]pvMoveJSON, 0, len(line.Moves))
+		for _, m := range line.Moves {
+			mv := pvMoveJSON{From: m.From, To: m.To}
+			if m.Promotion != 0 {
+				promo := int(m.Promotion)
+				mv.Promotion = &promo
+			}
+			moves = append(moves, mv)
+		}
+		out = append(out, multiPvLineJSON{
+			Moves:  moves,
+			Score:  line.Score,
+			Depth:  line.Depth,
+			Nodes:  line.Nodes,
+			TimeMs: line.TimeMs,
+		})
+	}
+
+	raw, err := json.Marshal(out)
+	if err != nil {
+		return js.ValueOf("[]")
+	}
+	return js.ValueOf(string(raw))
+}
+
+// fenJS returns the FEN string of the current position. Used by the bottom bar
+// to display the live FEN field.
+func fenJS(_ js.Value, _ []js.Value) interface{} {
+	return js.ValueOf(engine.Game.FEN())
+}
+
 func moveToJSON(move types.Move) interface{} {
 	moveJSON := struct {
 		From      int    `json:"from"`
@@ -156,6 +220,8 @@ func main() {
 	e.Set("aiMove", js.FuncOf(aiMoveJS))
 	e.Set("aiMoveDepth", js.FuncOf(aiMoveDepthJS))
 	e.Set("aiAnalysis", js.FuncOf(aiAnalysisJS))
+	e.Set("aiMultiPv", js.FuncOf(aiMultiPvJS))
+	e.Set("fen", js.FuncOf(fenJS))
 	js.Global().Set("goWasmEngine", e)
 	select {}
 }

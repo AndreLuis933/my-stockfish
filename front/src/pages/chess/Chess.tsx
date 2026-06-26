@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { ChessBoard } from "@/components/ChessBoard/ChessBoard";
 import { MoveHistory } from "@/components/MoveHistory/MoveHistory";
 import { PromotionPicker } from "@/components/PromotionPicker/PromotionPicker";
+import { AnalysisPanel } from "@/components/AnalysisPanel/AnalysisPanel";
+import { BottomBar } from "@/components/BottomBar/BottomBar";
 import type { ClockConfig } from "@/hooks/useChessClock";
 import { minutesToMs } from "@/hooks/useChessClock";
 import type { AiAnalysisResult } from "@/wasm/generated/wasm-contract";
@@ -89,6 +91,13 @@ export const Chess = () => {
     analysisForPly,
     exportPgn,
     loadPgn,
+    multiPv,
+    multiPvSan,
+    multiPvDepth,
+    multiPvThinking,
+    runMultiPv,
+    stopMultiPv,
+    currentFen,
   } = useChess(
     mode,
     aiColor,
@@ -120,6 +129,9 @@ export const Chess = () => {
 
   const [analysis, setAnalysis] = useState<AiAnalysisResult | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
+  const [analysisEnabled, setAnalysisEnabled] = useState(false);
+  const [maxLines, setMaxLines] = useState(1);
+  const [analysisTimeMs, setAnalysisTimeMs] = useState(1000);
 
   const [pgnModalOpen, setPgnModalOpen] = useState(false);
   const [pgnText, setPgnText] = useState("");
@@ -136,6 +148,7 @@ export const Chess = () => {
     setAnalysis(null);
     setPgnText("");
     setPgnError(null);
+    setAnalysisEnabled(false);
     restartGame();
   };
 
@@ -242,6 +255,32 @@ export const Chess = () => {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [currentPly, history.length, jumpToPly, pendingPromotion]);
+
+  // ── Continuous Multi-PV analysis (analysis mode, user-toggled) ───
+  useEffect(() => {
+    if (!isAnalysisMode || !analysisEnabled) {
+      stopMultiPv();
+      return;
+    }
+    if (result && isAtLatest) {
+      stopMultiPv();
+      return;
+    }
+    runMultiPv(maxLines, analysisTimeMs);
+    return () => stopMultiPv();
+  }, [isAnalysisMode, analysisEnabled, maxLines, analysisTimeMs, result, isAtLatest, currentPly, runMultiPv, stopMultiPv]);
+
+  const handleToggleAnalysis = () => {
+    setAnalysisEnabled((v) => !v);
+  };
+
+  const handleMaxLinesChange = (n: number) => {
+    setMaxLines(n);
+  };
+
+  const handleAnalysisTimeChange = (ms: number) => {
+    setAnalysisTimeMs(ms);
+  };
 
   return (
     <div className={styles.page}>
@@ -386,6 +425,19 @@ export const Chess = () => {
             arrow={arrow}
           />
 
+          {isAnalysisMode && (
+            <BottomBar
+              fen={currentFen}
+              pgn={exportPgn()}
+              onJumpToStart={() => jumpToPly(0)}
+              onJumpToEnd={() => jumpToPly(history.length)}
+              onStepBack={() => jumpToPly(currentPly - 1)}
+              onStepForward={() => jumpToPly(currentPly + 1)}
+              canStepBack={currentPly > 0}
+              canStepForward={currentPly < history.length}
+            />
+          )}
+
           <div className={styles.actions}>
             <button className={styles.actionButton} onClick={handleRestart}>
               Reiniciar
@@ -434,6 +486,15 @@ export const Chess = () => {
                 {autoAnalyze ? "Auto ✓" : "Analisar auto"}
               </button>
             )}
+            {isAnalysisMode && (
+              <button
+                className={`${styles.actionButton} ${analysisEnabled ? styles.actionButtonActive : ""}`}
+                onClick={handleToggleAnalysis}
+                title={analysisEnabled ? "Parar análise contínua" : "Iniciar análise contínua"}
+              >
+                {analysisEnabled ? "Análise ⏸" : "Análise ▶"}
+              </button>
+            )}
           </div>
 
           {displayedAnalysis && (
@@ -468,49 +529,67 @@ export const Chess = () => {
 
         {/* ── Right: sidebar ────────────────────────────── */}
         <div className={styles.sidebarArea}>
-          <div className={styles.clockConfig}>
-            <span className={styles.configTitle}>Relógio</span>
-            <div className={styles.presetRow}>
-              {CLOCK_PRESETS.map((p) => (
-                <button
-                  key={p.label}
-                  className={`${styles.presetButton} ${clockMinutes === p.minutes ? styles.presetButtonActive : ""}`}
-                  onClick={() => handleClockPreset(p.minutes)}
-                  disabled={gameStarted && clockConfig.enabled}
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
-            {clockConfig.enabled && (
-              <div className={styles.presetRow}>
-                <span className={styles.incrementLabel}>Incremento:</span>
-                {INCREMENT_PRESETS.map((s) => (
-                  <button
-                    key={s}
-                    className={`${styles.presetButtonSmall} ${clockIncrement === s ? styles.presetButtonActive : ""}`}
-                    onClick={() => setClockIncrement(s)}
-                    disabled={gameStarted}
-                  >
-                    {s}s
-                  </button>
-                ))}
+          {isAnalysisMode ? (
+            <AnalysisPanel
+              lines={multiPv}
+              thinking={multiPvThinking}
+              depth={multiPvDepth}
+              pvSanLines={multiPvSan}
+              blunderPly={null}
+              analysisEnabled={analysisEnabled}
+              onToggleAnalysis={handleToggleAnalysis}
+              maxLines={maxLines}
+              onMaxLinesChange={handleMaxLinesChange}
+              analysisTimeMs={analysisTimeMs}
+              onAnalysisTimeChange={handleAnalysisTimeChange}
+            />
+          ) : (
+            <>
+              <div className={styles.clockConfig}>
+                <span className={styles.configTitle}>Relógio</span>
+                <div className={styles.presetRow}>
+                  {CLOCK_PRESETS.map((p) => (
+                    <button
+                      key={p.label}
+                      className={`${styles.presetButton} ${clockMinutes === p.minutes ? styles.presetButtonActive : ""}`}
+                      onClick={() => handleClockPreset(p.minutes)}
+                      disabled={gameStarted && clockConfig.enabled}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+                {clockConfig.enabled && (
+                  <div className={styles.presetRow}>
+                    <span className={styles.incrementLabel}>Incremento:</span>
+                    {INCREMENT_PRESETS.map((s) => (
+                      <button
+                        key={s}
+                        className={`${styles.presetButtonSmall} ${clockIncrement === s ? styles.presetButtonActive : ""}`}
+                        onClick={() => setClockIncrement(s)}
+                        disabled={gameStarted}
+                      >
+                        {s}s
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
 
-          <MoveHistory
-            history={history}
-            currentPly={currentPly}
-            onJump={jumpToPly}
-            clocks={clock.clocks}
-            activeColor={currentPlayer}
-            clockEnabled={clockConfig.enabled}
-            flagFallen={clock.flagFallen}
-            result={result}
-            resultText={resultText}
-            onRestart={handleRestart}
-          />
+              <MoveHistory
+                history={history}
+                currentPly={currentPly}
+                onJump={jumpToPly}
+                clocks={clock.clocks}
+                activeColor={currentPlayer}
+                clockEnabled={clockConfig.enabled}
+                flagFallen={clock.flagFallen}
+                result={result}
+                resultText={resultText}
+                onRestart={handleRestart}
+              />
+            </>
+          )}
         </div>
       </div>
 

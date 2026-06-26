@@ -22,6 +22,18 @@ type SearchResult struct {
 	TimeMs int64
 }
 
+// SearchLineResult holds one line of a Multi-PV search: the principal
+// variation (as a sequence of moves), its score from the side-to-move's
+// perspective, the depth reached, and search statistics. Lines are sorted
+// by score descending (best line first).
+type SearchLineResult struct {
+	Moves  []types.Move
+	Score  int
+	Depth  int
+	Nodes  int
+	TimeMs int64
+}
+
 // genCounter is a package-level search generation counter, incremented before
 // each Search/SearchFixedDepth call. It is passed to TT.Store so that
 // replacement priority (gen + depth) reflects recency: old deep entries from
