@@ -1,0 +1,6 @@
+{
+  "framework": "vite",
+  "installCommand": "curl -fsSL https://go.dev/dl/go1.25.0.linux-amd64.tar.gz | tar -xz -C /usr/local && export PATH=\"$PATH:/usr/local/go/bin\" && go version && bun install",
+  "buildCommand": "export PATH=\"$PATH:/usr/local/go/bin\" && bun run build",
+  "rewrites": [{ "source": "/(.*)", "destination": "/" }]
+}
