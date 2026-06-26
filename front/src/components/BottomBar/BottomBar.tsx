@@ -65,9 +65,6 @@ export const BottomBar = ({
             >
               ▶|
             </button>
-            <button className={`${styles.controlBtn} ${styles.menuBtn}`} title="Menu">
-              ☰
-            </button>
           </div>
         </div>
       </div>

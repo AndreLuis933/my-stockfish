@@ -1,9 +1,7 @@
 import { useState } from "react";
-import { Figurine } from "@/components/Figurine/Figurine";
 import type { MultiPvLine } from "@/wasm/generated/wasm-contract";
-import type { ChessColor } from "@/types/chess";
 import { formatEval } from "@/utils/chessAnalysis";
-import { parseSanFigurine } from "@/utils/chessFigurine";
+import { SanText } from "@/components/chess/SanText";
 import type { PvSanEntry } from "@/utils/pvToSan";
 import styles from "./AnalysisPanel.module.css";
 
@@ -12,7 +10,6 @@ interface AnalysisPanelProps {
   thinking: boolean;
   depth: number;
   pvSanLines: PvSanEntry[][];
-  blunderPly: number | null;
   analysisEnabled: boolean;
   onToggleAnalysis: () => void;
   maxLines: number;
@@ -21,43 +18,11 @@ interface AnalysisPanelProps {
   onAnalysisTimeChange: (ms: number) => void;
 }
 
-const renderSanWithFigurine = (
-  san: string,
-  color: ChessColor,
-  isBlunder: boolean,
-  isMistake: boolean,
-): React.ReactNode => {
-  const { pieceType, rest } = parseSanFigurine(san);
-  return (
-    <span className={styles.pvMovePair}>
-      {pieceType && (
-        <Figurine
-          type={pieceType}
-          color={color}
-          className={styles.pvFigurine}
-        />
-      )}
-      <span
-        className={
-          isBlunder
-            ? styles.blunderMove
-            : isMistake
-              ? styles.mistakeMove
-              : undefined
-        }
-      >
-        {rest}
-      </span>
-    </span>
-  );
-};
-
 export const AnalysisPanel = ({
   lines,
   thinking,
   depth,
   pvSanLines,
-  blunderPly,
   analysisEnabled,
   onToggleAnalysis,
   maxLines,
@@ -183,15 +148,12 @@ export const AnalysisPanel = ({
         <div className={styles.pvList}>
           {lines.map((line, lineIdx) => {
             const sanEntries = pvSanLines[lineIdx] ?? [];
-            const isHighlighted = blunderPly !== null && lineIdx === 0;
             const scoreClass =
               line.score < 0 ? styles.pvEvalNegative : styles.pvEval;
 
             return (
               <div key={lineIdx}>
-                <div
-                  className={`${styles.pvRow} ${isHighlighted ? styles.pvRowHighlight : ""}`}
-                >
+                <div className={styles.pvRow}>
                   <span className={styles.pvRank}>{lineIdx + 1}</span>
                   <span className={styles.pvMoves}>
                     {sanEntries.map((entry, i) => {
@@ -200,24 +162,19 @@ export const AnalysisPanel = ({
                       return (
                         <span key={i} className={styles.pvMovePair}>
                           {showNum && (
-                            <span className={styles.pvMoveNum}>{moveNum}.</span>
-                          )}
-                          {renderSanWithFigurine(
-                            entry.san,
-                            entry.color,
-                            false,
-                            false,
-                          )}
+                             <span className={styles.pvMoveNum}>{moveNum}.</span>
+                           )}
+                           <SanText
+                             san={entry.san}
+                             color={entry.color}
+                             figurineClassName={styles.pvFigurine}
+                             className={styles.pvMovePair}
+                           />
                         </span>
                       );
                     })}
                   </span>
                   <span className={scoreClass}>{formatEval(line.score)}</span>
-                  {isHighlighted && blunderPly !== null && (
-                    <span className={styles.blunderBadge}>
-                      {formatEval(line.score)}
-                    </span>
-                  )}
                 </div>
               </div>
             );

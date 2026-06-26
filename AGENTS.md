@@ -27,38 +27,54 @@ my-stockfish/
 │       ├── App.tsx                   # Router: / → /checkers, /checkers, /chess
 │       ├── main.tsx                  # React root
 │       ├── wasm/
-│       │   ├── generated/wasm-contract.ts   # Hand-maintained TS contract for the Go functions (edit directly)
-│       │   ├── loader.ts                    # WasmWorkerEngine class (Web Worker bridge, typed async calls)
+│       │   ├── generated/wasm-contract.ts   # Hand-maintained TS contract for the Go functions (edit directly) — incl. AiAnalysisResult, PgnHistoryEntry
+│       │   ├── loader.ts                    # WasmWorkerEngine class (Web Worker bridge, typed async calls) — incl. san, applyPgn wrappers
 │       │   └── useWasm.ts                   # React hook: { engine, loading, error, restarting } + HMR restart
 │       ├── pages/
 │       │   ├── checkers/          # Route /checkers
 │       │   │   ├── Checkers.tsx
 │       │   │   └── Checkers.module.css
 │   │   └── chess/             # Route /chess
-│   │       ├── Chess.tsx              # Renders board, turn banner, promotion picker, "Xeque!" badge, result overlay, AI setup panel, clock config, move history sidebar
-│   │       ├── Chess.hooks.ts         # useChess: state machine bridging React ↔ Go WASM, AI turn effect, difficulty/time/depth search modes, move history + navigation, clock integration
-│   │       └── Chess.module.css
+│   │       ├── Chess.tsx              # Composes sub-components from components/chess/ (~300 lines; was 652)
+│   │       ├── Chess.hooks.ts         # useChess: state machine bridging React ↔ Go WASM, AI turn effect, difficulty/time/depth modes, move history + navigation, clock; delegates to useMultiPv + useChessAnalysis (~580 lines; was 866)
+│   │       └── Chess.module.css       # Layout-only styles (43 lines; was 549 — component styles moved to ChessShared.module.css)
 │       ├── components/
 │       │   ├── Board/             # Checkers board UI (Board.tsx + Board.module.css)
 │       │   ├── ChessBoard/        # Chess board UI (cburnett SVG pieces, selection + move hints + check glow)
-│       │   ├── MoveHistory/       # Move history sidebar (SAN notation, ply navigation, clocks display, result box)
+│       │   ├── MoveHistory/       # Move history sidebar (SAN via <SanText>, ply navigation, clocks display, result box)
 │       │   ├── PromotionPicker/   # Pawn promotion modal: Q/N/R/B picker using piece SVGs
-│       │   └── Nav/               # Top nav bar (links to /checkers and /chess)
-│       ├── hooks/useGame.ts       # Checkers state machine (uses TS AI)
-│       ├── hooks/useChessClock.ts # Chess clock hook: dual countdown, increments, flag-fall detection
+│       │   ├── Nav/               # Top nav bar (links to /checkers and /chess)
+│       │   ├── BottomBar/         # Bottom action bar (BottomBar.tsx + .module.css)
+│       │   ├── AnalysisPanel/     # Position analysis panel (uses <SanText>, no blunder highlighting)
+│       │   └── chess/            # Chess page sub-components (composed by Chess.tsx)
+│       │       ├── SanText.tsx            # Shared SAN+figurine renderer (replaces duplicated renderSanWithFigurine/renderMoveText)
+│       │       ├── ModeSelector.tsx        # Game mode buttons (Humano vs IA, etc.)
+│       │       ├── AiSetupPanel.tsx       # AI color/search-mode/difficulty/time/depth config
+│       │       ├── TurnBanner.tsx         # Turn indicator with thinking/check/history badges
+│       │       ├── ClockConfigPanel.tsx   # Clock presets + increment
+│       │       ├── ActionBar.tsx          # Reiniciar/Girar/Copiar/Colar/Analisar/Auto buttons
+│       │       ├── AnalysisSummary.tsx     # Inline eval/best-move/depth panel
+│       │       ├── PgnImportModal.tsx     # PGN paste modal
+│       │       └── ChessShared.module.css # Shared styles for all chess sub-components (391 lines)
+│       ├── hooks/
+│       │   ├── useGame.ts         # Checkers state machine (uses TS AI)
+│       │   ├── useChessClock.ts   # Chess clock hook: dual countdown, increments, flag-fall detection
+│       │   ├── useMultiPv.ts      # Multi-PV continuous analysis: multiPv, runMultiPv, stopMultiPv, multiPvSan/depth/thinking
+│       │   └── useChessAnalysis.ts # Analysis: analyze, autoAnalyze, setAutoAnalyze, analyzeCurrentPosition, analysisForPly
 │       ├── utils/
 │       │   ├── gameEngine.ts      # Checkers: move gen, captures, flying kings, applyMove, turn state
 │       │   ├── aiEngine.ts        # Checkers AI: Minimax + Alpha-Beta + IDDFS, depth 8
-│       │   ├── chessEngine.ts     # Chess: emptyBoard(), pieceByte(), square helpers (board init is in Go)
 │       │   ├── chessAssets.ts     # pieceImageUrl(piece) → cburnett SVG path (shared by ChessBoard + PromotionPicker)
-│       │   └── chessNotation.ts   # Chess SAN-like notation generator (toSan, squareName, disambiguation, castling, promotion, check/mate suffixes)
+│       │   ├── chessNotation.ts   # Chess SAN helpers (toSan, canPieceReach, isPathClear) — used by pvToSan.ts; parsePgn/promoByte/colorBits moved to Go/types
+│       │   ├── chessAnalysis.ts   # formatEval (move-quality classification removed — dead code)
+│       │   └── chessFigurine.ts   # Figurine glyph helpers (figurineColorForMove removed — identity, unused)
 │       ├── types/
 │       │   ├── game.ts            # Checkers: Color, PieceType, Piece, Cell, Board, Move
-│       │   └── chess.ts           # Chess: ChessColor, ChessPieceType, ChessPiece, ChessBoard, getPiece, decodePieceByte
+│       │   └── chess.ts           # Chess: ChessColor, ChessPieceType, ChessPiece, ChessBoard, ChessMove, HistoryEntry, getPiece, decodePieceByte, emptyBoard, colorBits, pieceByte
 │       └── assets/                # Static images (hero, react/vite svg)
 ├── go-wasm/                        # Go source compiled to WASM (module: webassemble, go 1.25)
 │   ├── cmd/
-│   │   ├── wasm/main.go           # WASM entry: registers goWasmEngine.{validMovesChess, initBoard, makeMove, isCheckJS, gameStatus, aiMove, aiMoveDepth, aiAnalysis}
+│   │   ├── wasm/main.go           # WASM entry: registers goWasmEngine.{validMovesChess, initBoard, makeMove, isCheckJS, gameStatus, aiMove, aiMoveDepth, aiAnalysis, aiMultiPv, fen, san, applyPgn}
 │   │   ├── uci/main.go            # UCI engine entry: standalone CLI engine for cutechess-cli testing (persistent TT, panic recovery, fallback move)
 │   │   └── command/main.go        # CLI debug entry: loads FEN, runs Perft depths 1-5
 │   ├── pkg/
@@ -86,12 +102,14 @@ my-stockfish/
 │   │   │   ├── zobrist.go         # Zobrist hashing: [12][64]uint64 piece keys + side + castling + EP keys (fixed seed), ComputeHash() (full), hashDeltaMove/hashDeltaPiece (incremental)
 │   │   │   ├── tt.go              # TranspositionTable: TTEntry (16 bytes: key, score int16, depth, flag, gen, move uint16), Probe/Store/Clear/FillPercent/Size, PackMove/UnpackMove, DefaultTranspositionTable (32MB), gen-aware replacement (gen+depth priority), TTEntrySize constant + TestTTEntrySize
 │   │   │   ├── perft.go           # Position.Perft(depth): recursive node count using Make/Unmake + stack-allocated MoveList per ply
+│   │   │   ├── san.go             # SAN generation + parsing: ToSan (disambiguation, castling, promotion, en passant, check/mate suffixes), SanToMove (match SAN to legal move), sanSquare/sanToIndex, stripCheckSuffix, disambiguation, appendCheckSuffix
 │   │   │   ├── legal_test.go      # Tests: FEN loading, castling rights, legal move counts, pins, en-passant discovered check, king-in-check
 │   │   │   ├── fen_test.go        # Tests: en passant target parsing, halfmove clock, fullmove number, squareToIndex, Make/Unmake clock management
 │   │   │   ├── status_test.go     # Tests: CurrentStatus, GameStatus.String/IsGameOver, statusFor
 │   │   │   ├── perft_test.go      # Tests: Perft on all 6 chessprogramming.org standard positions
 │   │   │   ├── zobrist_test.go    # Tests: incremental hash matches full recompute, hash uniqueness, side-to-move, promotion
 │   │   │   ├── tt_test.go         # Tests: TTEntry struct size stays 16 bytes (Gen field fits in padding)
+│   │   │   ├── san_test.go        # Tests: SAN generation (pawn/knight/bishop/queen/king moves, castling, en passant, promotion, disambiguation, check/mate suffixes), SAN↔Move round-trip, castling notation parsing, invalid SAN rejection
 │   │   │   └── draw_test.go       # Tests: threefold repetition, insufficient material (KvK, KBvK, KNvK, KBvsKB same/diff color), 50-move rule, CurrentStatus draw
 │   │   └── ai/                    # Chess AI (pure Go, no JS deps except build-tagged clock)
 │   │       ├── ai.go              # Evaluate(p *Position): O(1) read of incremental EvalScore (negated for side to move) — material + PST maintained by Make/Unmake
@@ -131,7 +149,7 @@ my-stockfish/
 - Game runs in the browser via Go WASM: human-vs-human, **human-vs-AI** (AI plays either color), and **AI-vs-AI** (both sides played by the engine)
 - **Standalone UCI engine** (`cmd/uci`): supports cutechess-cli for automated testing; persistent TT (cleared on `ucinewgame`), panic recovery, fallback legal move, `go depth`/`go wtime`/`go movetime`/`go infinite`, `stop`, `quit`, `position startpos|fen moves ...`
 - **Chess AI** (`pkg/ai`): negamax + alpha-beta + iterative deepening + **transposition table** + **quiescence search** + **killer moves + history heuristic** + **null-move pruning** + **late move reductions (LMR)** + **aspiration windows** in Go; material + piece-square table evaluation (incremental); MVV + killers + history move ordering; time-limited or fixed-depth search; depth 12 at 1s on starting position
-- Go engine handles: board representation, FEN loading (all 6 fields), move generation for all piece types, captures, en passant, pawn promotion, **castling**
+- Go engine handles: board representation, FEN loading (all 6 fields), move generation for all piece types, captures, en passant, pawn promotion, **castling**, **SAN generation + parsing**, **PGN replay**
 - **Position struct**: all game state in `Position` (Board, WhiteToMove, CastlingRights, EnPassant*, HalfmoveClock, FullmoveNumber, Hash, KingSquares, EvalScore, undoStack[maxPly], undoPly); a global `Game *Position` is used by the WASM bridge; the AI uses the same Position via `Make`/`Unmake`
 - **Zobrist hashing**: `[12][64]uint64` piece keys + side + castling + EP keys (fixed seed); `Hash` maintained incrementally in `Make`/`Unmake` via XOR; `ComputeHash()` for initial computation in `LoadFen`
 - **Transposition table**: 32MB default (2M entries × 16 bytes); `TTEntry{key, score int16, depth, flag, gen, move uint16}`; **gen-aware replacement** (gen+depth priority: recent shallow entries replace old deep ones, so entries from early moves decay as the game progresses); `Probe`/`Store`/`Clear`/`FillPercent`; mate score ply adjustment (`scoreToTT`/`scoreFromTT`); TT move used for move ordering; `Gen` field fits in struct padding (still 16 bytes)
@@ -152,6 +170,8 @@ my-stockfish/
 - **Check detection**: `Position.IsSquareAttacked` (reverse-scan from a square) + `Position.IsInCheck` (O(1) king lookup + attack scan) + `KingCheck()` exposed to the frontend as `isCheckJS`
 - **Game status**: `Position.CurrentStatus()` returns `playing | white-wins | black-wins | draw`, exposed as `gameStatus`
 - **Perft validation**: `Position.Perft()` runs recursive move enumeration using Make/Unmake + stack-allocated MoveList; validated against all 6 standard positions from chessprogramming.org/Perft_Results
+- **SAN + PGN in Go**: `Position.ToSan(m)` generates SAN (disambiguation, castling, promotion, en passant, check/mate suffixes); `Position.SanToMove(san)` matches a SAN string to a legal move; the WASM bridge exposes `san` (generate SAN for a move) and `applyPgn` (replay a full PGN in one round-trip, returning a history array). The frontend no longer does SAN generation or PGN parsing in TypeScript — `applyMove` calls `engine.san()`, and `loadPgn` calls `engine.applyPgn()`.
+- **Frontend split**: `Chess.tsx` (was 652 lines) composes sub-components from `components/chess/` (`SanText`, `ModeSelector`, `AiSetupPanel`, `TurnBanner`, `ClockConfigPanel`, `ActionBar`, `AnalysisSummary`, `PgnImportModal`); `Chess.hooks.ts` (was 866 lines) delegates to `useMultiPv` and `useChessAnalysis`; `Chess.module.css` holds only layout styles (component styles in `ChessShared.module.css`).
 - Pawn promotion: `PromotionPicker` modal lets the user choose Q/N/R/B; the AI returns promotion bytes automatically
 - Move validation: clicking a piece queries `engine.validMovesChess()`, highlights legal targets
 - **Check highlight**: king's square glows red + "Xeque!" badge in turn banner
@@ -201,6 +221,7 @@ my-stockfish/
 | Type generator auto-run | The Vite plugin does **not** run the type generator — it only builds the WASM and sends HMR. `wasm-contract.ts` is maintained by hand. |
 | Optional arg in contract | The generator emits all params as required. `makeMove`'s 3rd arg (`promotion`) was manually marked optional in `wasm-contract.ts`. |
 | Checkers → Go | Checkers logic stays in TypeScript for now; no plan to port it to Go. |
+| PV-SAN in TS | `chessNotation.ts` still has `toSan`, `canPieceReach`, `isPathClear` (used by `pvToSan.ts` for multi-PV line notation). These will be removed when PV-SAN moves to Go. |
 
 ---
 
@@ -230,6 +251,10 @@ React component
 | `aiMove` | `aiMoveJS` | `ai.SearchWithTT(engine.Game, timeLimitMs, nil, sharedTT)` | `number` (time limit ms) | JSON string `{from, to, promotion?}` |
 | `aiMoveDepth` | `aiMoveDepthJS` | `ai.SearchFixedDepthWithTT(engine.Game, depth, nil, sharedTT)` | `number` (depth) | JSON string `{from, to, promotion?}` |
 | `aiAnalysis` | `aiAnalysisJS` | `ai.SearchWithTT(engine.Game, timeLimitMs, nil, sharedTT)` | `number` (time limit ms) | JSON string `{from, to, promotion?, score, depth, nodes, timeMs}` |
+| `aiMultiPv` | `aiMultiPvJS` | — | `number, number` (time, numLines) | JSON string (multi-PV lines) |
+| `fen` | `fenJS` | — | — | `string` (current FEN) |
+| `san` | `sanJS` | `engine.Game.ToSan(move)` | `number, number, number?` (from, to, promotion?) | `string` (SAN) |
+| `applyPgn` | `applyPgnJS` | — | `string` (PGN) | JSON string of `PgnHistoryEntry[]` |
 
 ### Piece byte encoding (shared between Go and TS)
 

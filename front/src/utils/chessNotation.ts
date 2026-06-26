@@ -1,4 +1,4 @@
-import type { ChessBoard, ChessColor, ChessPieceType } from "@/types/chess";
+import type { ChessBoard, ChessColor, ChessPieceType, ChessMove } from "@/types/chess";
 import { getPiece } from "@/types/chess";
 
 const FILES = "abcdefgh";
@@ -24,9 +24,6 @@ const PROMOTION_LETTERS: Record<number, string> = {
   0b00001000: "R",
   0b00010000: "Q",
 };
-
-const colorBits = (color: ChessColor): number =>
-  color === "white" ? 0b01000000 : 0b10000000;
 
 const isPathClear = (
   board: ChessBoard,
@@ -88,15 +85,9 @@ const canPieceReach = (
   }
 };
 
-export interface MoveData {
-  from: number;
-  to: number;
-  promotion?: number;
-}
-
 export const toSan = (
   boardBefore: ChessBoard,
-  move: MoveData,
+  move: ChessMove,
   color: ChessColor,
   checkSquareAfter: number | null,
   isCheckmate: boolean,
@@ -176,9 +167,6 @@ const appendCheckSuffix = (
   return san;
 };
 
-export const stripCheckSuffix = (san: string): string =>
-  san.replace(/[+#]+$/, "").replace(/[!?]+$/, "");
-
 export const historyToPgn = (
   history: { san: string; color: ChessColor }[],
   result: "white-wins" | "black-wins" | "draw" | null,
@@ -227,42 +215,4 @@ export const historyToPgn = (
   if (line) lines.push(line);
 
   return `${headers.join("\n")}\n\n${lines.join("\n")} ${resultStr}`;
-};
-
-export const parsePgn = (pgn: string): string[] => {
-  const withoutHeaders = pgn
-    .split("\n")
-    .filter((l) => !l.trim().startsWith("["))
-    .join(" ");
-
-  let s = withoutHeaders.replace(/\{[^}]*\}/g, " ");
-  while (/\([^)]*\)/.test(s)) s = s.replace(/\([^)]*\)/g, " ");
-  s = s.replace(/\$\d+/g, " ");
-
-  const rawTokens = s.split(/\s+/).filter(Boolean);
-  const moves: string[] = [];
-  for (let tok of rawTokens) {
-    tok = tok.replace(/^\d+\.+/, "");
-    if (!tok) continue;
-    if (tok === "1-0" || tok === "0-1" || tok === "1/2-1/2" || tok === "*") continue;
-    moves.push(tok);
-  }
-  return moves;
-};
-
-export const promoByte = (
-  color: ChessColor,
-  type: ChessPieceType,
-): number => colorBits(color) | promoTypeBits(type);
-
-const promoTypeBits = (type: ChessPieceType): number => {
-  const map: Record<ChessPieceType, number> = {
-    pawn: 0b00000001,
-    knight: 0b00000010,
-    bishop: 0b00000100,
-    rook: 0b00001000,
-    queen: 0b00010000,
-    king: 0b00100000,
-  };
-  return map[type];
 };

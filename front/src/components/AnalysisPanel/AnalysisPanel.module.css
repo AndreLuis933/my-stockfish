@@ -294,40 +294,6 @@
   height: 12px;
 }
 
-/* ── Blunder highlight ────────────────────────────────── */
-
-.blunderMove {
-  color: #e55;
-  font-weight: 600;
-}
-
-.mistakeMove {
-  color: #e80;
-}
-
-.blunderBadge {
-  display: inline-block;
-  background: #e8a33d;
-  color: #fff;
-  font-weight: 700;
-  font-size: 11px;
-  padding: 1px 6px;
-  border-radius: 4px;
-  margin-left: 4px;
-}
-
-/* ── Highlighted current move row ─────────────────────── */
-
-.pvRowHighlight {
-  background: rgba(232, 163, 61, 0.18);
-  border-left: 3px solid #e8a33d;
-  padding-left: 11px;
-}
-
-.pvRowHighlight:hover {
-  background: rgba(232, 163, 61, 0.25);
-}
-
 /* ── Empty state ──────────────────────────────────────── */
 
 .empty {

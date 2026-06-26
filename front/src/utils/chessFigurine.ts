@@ -1,4 +1,4 @@
-import type { ChessColor, ChessPieceType } from "@/types/chess";
+import type { ChessPieceType } from "@/types/chess";
 
 const PIECE_LETTER_TO_TYPE: Record<string, ChessPieceType> = {
   K: "king",
@@ -21,6 +21,3 @@ export const parseSanFigurine = (san: string): ParsedSan => {
   }
   return { pieceType: null, rest: clean };
 };
-
-export const figurineColorForMove = (moveColor: ChessColor): ChessColor =>
-  moveColor;

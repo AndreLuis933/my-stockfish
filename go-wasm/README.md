@@ -28,6 +28,8 @@ The engine handles all chess logic for the browser app:
 - **Game status**: `CurrentStatus()` returns `playing | white-wins | black-wins | draw` (checkmate = no legal moves + in check, stalemate = no legal moves + not in check, draw = 50-move / threefold repetition / insufficient material)
 - **Draw rules**: `IsRepetition()` (undo stack hash scan, bounded by halfmove clock), `IsFiftyMoveRule()`, `IsInsufficientMaterial()` (zero-alloc: K vs K, K+B vs K, K+N vs K, K+B vs K+B same color), `IsDraw()`
 - **Perft validation**: `Perft()` recursive move enumeration using Make/Unmake + stack-allocated MoveList; validated against all 6 standard positions from chessprogramming.org/Perft_Results
+- **SAN generation + parsing**: `Position.ToSan(m Move)` generates SAN (disambiguation, castling, promotion, en passant, check/mate suffixes); `Position.SanToMove(san)` matches a SAN string to a legal move; `sanSquare`/`sanToIndex` convert board indices ↔ algebraic; exposed to JS via `san` and `applyPgn` bridges
+- **PGN replay**: the `applyPgn` bridge replays a full PGN in one call — parses SAN tokens, applies each via `Make`, and returns a JSON array of history entries (board + SAN + status per ply)
 
 ### AI (`pkg/ai`)
 
@@ -82,11 +84,13 @@ go-wasm/
 │   │   ├── zobrist.go         # Zobrist hashing: [12][64]uint64 piece keys + side + castling + EP keys (fixed seed), ComputeHash() (full), hashDeltaMove/hashDeltaPiece (incremental)
 │   │   ├── tt.go              # TranspositionTable: TTEntry (16 bytes, Gen fits in padding), Probe/Store (gen+depth replacement)/Clear/FillPercent/Size, PackMove/UnpackMove, DefaultTranspositionTable (32MB), TTEntrySize + TestTTEntrySize
 │   │   ├── perft.go           # Perft(depth): recursive node count using Make/Unmake + stack MoveList per ply
+│   │   ├── san.go             # SAN generation + parsing: ToSan (disambiguation, castling, promotion, en passant, check/mate suffixes), SanToMove (match SAN to legal move), sanSquare/sanToIndex, stripCheckSuffix, disambiguation, appendCheckSuffix
 │   │   ├── legal_test.go      # Tests: FEN, castling rights, legal moves, pins, en passant, king-in-check
 │   │   ├── fen_test.go        # Tests: en passant target, halfmove clock, fullmove number, Make/Unmake clocks
 │   │   ├── status_test.go     # Tests: CurrentStatus, GameStatus.String/IsGameOver, statusFor
 │   │   ├── perft_test.go      # Tests: Perft on all 6 chessprogramming.org positions
 │   │   ├── zobrist_test.go    # Tests: incremental hash matches full recompute, hash uniqueness, side-to-move, promotion
+│   │   ├── san_test.go        # Tests: SAN generation (pawn/knight/bishop/queen/king moves, castling, en passant, promotion, disambiguation, check/mate suffixes), SAN↔Move round-trip, castling notation parsing, invalid SAN rejection
 │   │   └── draw_test.go       # Tests: threefold repetition, insufficient material (KvK, KBvK, KNvK, KBvsKB same/diff color), 50-move rule, CurrentStatus draw
 │   └── ai/                    # Chess AI (pure Go, no JS deps except build-tagged clock)
 │       ├── ai.go              # Evaluate(): O(1) read of incremental EvalScore (negated for side to move)
@@ -275,9 +279,13 @@ Browser (WASM) performance is typically 2-3x slower due to WASM overhead.
 | `makeMove` | `makeMoveJS` | `engine.MakeMove(from, to, promotion)` | `number, number, number?` | `number[]` (64 board bytes) |
 | `isCheckJS` | `isCheckJS` | `engine.KingCheck()` | — | `number` (checked king's square index, or -1) |
 | `gameStatus` | `gameStatusJS` | `engine.CurrentStatus().String()` | — | `string` (`"playing"` \| `"white-wins"` \| `"black-wins"` \| `"draw"`) |
-| `aiMove` | `aiMoveJS` | `ai.Search(engine.Game, timeLimitMs, nil)` | `number` (time limit ms) | JSON string `{from, to, promotion?}` |
-| `aiMoveDepth` | `aiMoveDepthJS` | `ai.SearchFixedDepth(engine.Game, depth, nil)` | `number` (depth) | JSON string `{from, to, promotion?}` |
-| `aiAnalysis` | `aiAnalysisJS` | `ai.Search(engine.Game, timeLimitMs, nil)` | `number` (time limit ms) | JSON string `{from, to, promotion?, score, depth, nodes, timeMs}` |
+| `aiMove` | `aiMoveJS` | `ai.SearchWithTT(engine.Game, timeLimitMs, nil, sharedTT)` | `number` (time limit ms) | JSON string `{from, to, promotion?}` |
+| `aiMoveDepth` | `aiMoveDepthJS` | `ai.SearchFixedDepthWithTT(engine.Game, depth, nil, sharedTT)` | `number` (depth) | JSON string `{from, to, promotion?}` |
+| `aiAnalysis` | `aiAnalysisJS` | `ai.SearchWithTT(engine.Game, timeLimitMs, nil, sharedTT)` | `number` (time limit ms) | JSON string `{from, to, promotion?, score, depth, nodes, timeMs}` |
+| `aiMultiPv` | `aiMultiPvJS` | — | `number, number` (time, numLines) | JSON string (multi-PV lines) |
+| `fen` | `fenJS` | — | — | `string` (current FEN) |
+| `san` | `sanJS` | `engine.Game.ToSan(move)` | `number, number, number?` (from, to, promotion?) | `string` (SAN) |
+| `applyPgn` | `applyPgnJS` | — | `string` (PGN) | JSON string of `PgnHistoryEntry[]` |
 
 ---
 

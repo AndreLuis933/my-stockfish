@@ -60,26 +60,42 @@ src/
 ├── components/
 │   ├── Board/             # Checkers board UI (Board.tsx + Board.module.css)
 │   ├── ChessBoard/        # Chess board UI (cburnett SVG pieces, selection + move hints + check glow)
-│   ├── MoveHistory/       # Move history sidebar (SAN notation, ply navigation, clocks display, result box)
+│   ├── MoveHistory/       # Move history sidebar (SAN via <SanText>, ply navigation, clocks display, result box)
 │   ├── PromotionPicker/   # Pawn promotion modal (Q/N/R/B)
-│   └── Nav/               # Top nav bar
+│   ├── Nav/               # Top nav bar
+│   ├── BottomBar/         # Bottom action bar (BottomBar.tsx + .module.css)
+│   ├── AnalysisPanel/     # Position analysis panel (uses <SanText>, no blunder highlighting)
+│   └── chess/            # Chess page sub-components (composed by Chess.tsx)
+│       ├── SanText.tsx            # Shared SAN+figurine renderer (replaces duplicated renderSanWithFigurine/renderMoveText)
+│       ├── ModeSelector.tsx        # Game mode buttons (Humano vs IA, etc.)
+│       ├── AiSetupPanel.tsx       # AI color/search-mode/difficulty/time/depth config
+│       ├── TurnBanner.tsx         # Turn indicator with thinking/check/history badges
+│       ├── ClockConfigPanel.tsx   # Clock presets + increment
+│       ├── ActionBar.tsx          # Reiniciar/Girar/Copiar/Colar/Analisar/Auto buttons
+│       ├── AnalysisSummary.tsx     # Inline eval/best-move/depth panel
+│       ├── PgnImportModal.tsx     # PGN paste modal
+│       └── ChessShared.module.css # Shared styles for all chess sub-components
 ├── pages/
 │   ├── checkers/          # Route /checkers (Checkers.tsx + Checkers.module.css)
 │   └── chess/             # Route /chess (Chess.tsx + Chess.hooks.ts + Chess.module.css)
-├── hooks/useGame.ts       # Checkers state machine (uses TS AI)
-├── hooks/useChessClock.ts # Chess clock hook: dual countdown, increments, flag-fall detection
+├── hooks/
+│   ├── useGame.ts         # Checkers state machine (uses TS AI)
+│   ├── useChessClock.ts   # Chess clock: dual countdown, increments, flag-fall detection
+│   ├── useMultiPv.ts      # Multi-PV continuous analysis: multiPv, runMultiPv, stopMultiPv, multiPvSan/depth/thinking
+│   └── useChessAnalysis.ts # Analysis: analyze, autoAnalyze, setAutoAnalyze, analyzeCurrentPosition, analysisForPly
 ├── utils/
 │   ├── gameEngine.ts      # Checkers: move gen, captures, flying kings, applyMove
 │   ├── aiEngine.ts        # Checkers AI: Minimax + Alpha-Beta + IDDFS
-│   ├── chessEngine.ts     # Chess: emptyBoard(), pieceByte(), square helpers
 │   ├── chessAssets.ts     # pieceImageUrl() → cburnett SVG path
-│   └── chessNotation.ts   # Chess SAN-like notation generator (toSan, squareName, disambiguation, castling, promotion, check/mate suffixes)
+│   ├── chessNotation.ts   # Chess SAN helpers (toSan, canPieceReach, isPathClear) — used by pvToSan.ts; parsePgn/promoByte/colorBits moved to Go/types
+│   ├── chessAnalysis.ts   # formatEval (move-quality classification removed)
+│   └── chessFigurine.ts   # Figurine glyph helpers (figurineColorForMove removed — dead code)
 ├── types/
 │   ├── game.ts            # Checkers types (Color, PieceType, Piece, Cell, Board, Move)
-│   └── chess.ts           # Chess types (ChessColor, ChessPiece, ChessBoard, getPiece, decodePieceByte)
+│   └── chess.ts           # Chess types (ChessColor, ChessPiece, ChessBoard, ChessMove, HistoryEntry, getPiece, decodePieceByte, emptyBoard, colorBits, pieceByte)
 ├── wasm/
-│   ├── generated/wasm-contract.ts   # Hand-maintained TS contract for Go functions (edit directly)
-│   ├── loader.ts                    # WasmWorkerEngine (Web Worker bridge, typed async calls)
+│   ├── generated/wasm-contract.ts   # Hand-maintained TS contract for Go functions (edit directly) — incl. AiAnalysisResult, PgnHistoryEntry
+│   ├── loader.ts                    # WasmWorkerEngine (Web Worker bridge, typed async calls) — incl. san, applyPgn wrappers
 │   └── useWasm.ts                   # React hook: { engine, loading, error, restarting } + HMR restart
 └── assets/                # Static images
 
@@ -124,6 +140,10 @@ React component
 | `aiMove` | `number` (time limit ms) | JSON string `{from, to, promotion?}` | AI best move via time-limited search |
 | `aiMoveDepth` | `number` (depth) | JSON string `{from, to, promotion?}` | AI best move via fixed-depth search |
 | `aiAnalysis` | `number` (time limit ms) | JSON string `{from, to, promotion?, score, depth, nodes, timeMs}` | AI analysis: best move + evaluation + search info |
+| `aiMultiPv` | `number, number` (time, numLines) | JSON string (multi-PV lines) | Multi-PV continuous analysis |
+| `fen` | — | `string` | Current FEN |
+| `san` | `number, number, number?` (from, to, promotion?) | `string` (SAN) | Generate SAN for a move (Go-side) |
+| `applyPgn` | `string` (PGN) | JSON string of `PgnHistoryEntry[]` | Replay a full PGN in one round-trip (Go-side) |
 
 ### Vite plugin (`plugins/go-wasm.ts`)
 

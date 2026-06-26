@@ -1,17 +1,9 @@
 import { useEffect, useRef } from "react";
 import { formatClock } from "@/hooks/useChessClock";
-import { Figurine } from "@/components/Figurine/Figurine";
-import type { AiAnalysisResult } from "@/wasm/generated/wasm-contract";
-import type { ChessColor } from "@/types/chess";
+import type { ChessColor, HistoryEntry } from "@/types/chess";
 import { formatEval } from "@/utils/chessAnalysis";
-import { parseSanFigurine } from "@/utils/chessFigurine";
+import { SanText } from "@/components/chess/SanText";
 import styles from "./MoveHistory.module.css";
-
-export interface HistoryEntry {
-  san: string;
-  color: ChessColor;
-  analysis?: AiAnalysisResult | null;
-}
 
 interface MoveHistoryProps {
   history: HistoryEntry[];
@@ -32,22 +24,6 @@ const NAV_BUTTONS = [
   { delta: 1, label: "▶", title: "Próximo" },
   { delta: Infinity, label: "▶|", title: "Fim" },
 ] as const;
-
-const renderMoveText = (san: string, color: ChessColor): React.ReactNode => {
-  const { pieceType, rest } = parseSanFigurine(san);
-  return (
-    <>
-      {pieceType && (
-        <Figurine
-          type={pieceType}
-          color={color}
-          className={styles.moveFigurine}
-        />
-      )}
-      <span className={styles.moveText}>{rest}</span>
-    </>
-  );
-};
 
 export const MoveHistory = ({
   history,
@@ -150,7 +126,14 @@ export const MoveHistory = ({
                 className={`${styles.moveCell} ${currentPly === whitePly ? styles.moveCellActive : ""}`}
                 onClick={() => onJump(whitePly)}
               >
-                {row.white && renderMoveText(row.white.san, "white")}
+                {row.white && (
+                  <SanText
+                    san={row.white.san}
+                    color="white"
+                    figurineClassName={styles.moveFigurine}
+                    textClassName={styles.moveText}
+                  />
+                )}
                 {row.white?.analysis && (
                   <span
                     className={`${styles.evalTag} ${row.white.analysis.score < 0 ? styles.evalTagNegative : ""}`}
@@ -165,7 +148,14 @@ export const MoveHistory = ({
                 onClick={() => onJump(blackPly)}
                 disabled={!row.black}
               >
-                {row.black && renderMoveText(row.black.san, "black")}
+                {row.black && (
+                  <SanText
+                    san={row.black.san}
+                    color="black"
+                    figurineClassName={styles.moveFigurine}
+                    textClassName={styles.moveText}
+                  />
+                )}
                 {row.black?.analysis && (
                   <span
                     className={`${styles.evalTag} ${row.black.analysis.score < 0 ? styles.evalTagNegative : ""}`}

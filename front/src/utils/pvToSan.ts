@@ -1,5 +1,5 @@
-import type { ChessBoard, ChessColor } from "@/types/chess";
-import { toSan, type MoveData } from "@/utils/chessNotation";
+import type { ChessBoard, ChessColor, ChessMove } from "@/types/chess";
+import { toSan } from "@/utils/chessNotation";
 
 export interface PvSanEntry {
   san: string;
@@ -8,7 +8,7 @@ export interface PvSanEntry {
 
 export const pvToSan = (
   boardBefore: ChessBoard,
-  pv: { from: number; to: number; promotion?: number }[],
+  pv: ChessMove[],
   startColor: ChessColor,
 ): PvSanEntry[] => {
   const entries: PvSanEntry[] = [];
@@ -17,12 +17,7 @@ export const pvToSan = (
 
   for (const move of pv) {
     if (!move || move.from == null || move.to == null) break;
-    const moveData: MoveData = {
-      from: move.from,
-      to: move.to,
-      promotion: move.promotion,
-    };
-    const san = toSan(board, moveData, color, null, false);
+    const san = toSan(board, move, color, null, false);
     entries.push({ san, color });
 
     board[move.to] = board[move.from] ?? 0;

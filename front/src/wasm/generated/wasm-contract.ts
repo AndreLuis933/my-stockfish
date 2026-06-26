@@ -10,8 +10,9 @@ export interface WasmContract {
   aiAnalysis: { args: [number]; return: string };
   aiMultiPv: { args: [number, number]; return: string };
   fen: { args: []; return: string };
+  san: { args: [number, number, number?]; return: string };
+  applyPgn: { args: [string]; return: string };
 }
-;
 
 export interface AiAnalysisResult {
   from: number;
@@ -37,6 +38,17 @@ export interface MultiPvLine {
   timeMs: number;
 }
 
+export interface PgnHistoryEntry {
+  san: string;
+  from: number;
+  to: number;
+  promotion?: number;
+  boardBefore: number[];
+  boardAfter: number[];
+  checkSquare: number;
+  isCheckmate: boolean;
+}
+
 export type WasmFunctionName = keyof WasmContract;
 
 export type WasmEngine = {
@@ -44,7 +56,3 @@ export type WasmEngine = {
     ...args: WasmContract[K]["args"]
   ) => Promise<WasmContract[K]["return"]>;
 };
-
-export type WasmResult<T> =
-  | { ok: true; value: T }
-  | { ok: false; error: string };
