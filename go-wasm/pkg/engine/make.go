@@ -109,18 +109,31 @@ func (p *Position) Make(move types.Move) {
 	var hashDelta uint64
 
 	var occDelta Bitboard
+	isWhite := piece.Color() == types.ColorWhite
+	var colorOcc *Bitboard
+	if isWhite {
+		colorOcc = &p.WhitePieces
+	} else {
+		colorOcc = &p.BlackPieces
+	}
 
 	switch move.Flag {
 	case types.FlagEnPassant:
 		p.Board[captureSquare] = 0
 		p.Board[from] = 0
 		p.Board[to] = piece
-		pieceBB := p.pieceBitboardFor(piece)
-		pieceColorOcc := p.colorOccupancy(piece)
-		occDelta ^= p.movePieceBB(pieceBB, pieceColorOcc, from, to)
+		// Inline: move piece bitboard from→to, clear captured.
+		moveBB := p.pieceBitboardFor(piece)
+		delta := Bitboard(1)<<from | Bitboard(1)<<to
+		*moveBB ^= delta
+		*colorOcc ^= delta
+		occDelta ^= delta
 		capBB := p.pieceBitboardFor(move.Captured)
+		capDelta := Bitboard(1) << captureSquare
+		*capBB &^= capDelta
 		capColorOcc := p.colorOccupancy(move.Captured)
-		occDelta ^= p.removePieceBB(capBB, capColorOcc, captureSquare)
+		*capColorOcc &^= capDelta
+		occDelta ^= capDelta
 		evalDelta -= signedPieceValue(move.Captured, captureSquare)
 		evalDelta -= signedPieceValue(piece, from)
 		evalDelta += signedPieceValue(piece, to)
@@ -132,9 +145,11 @@ func (p *Position) Make(move types.Move) {
 		p.Board[to] = piece
 		p.EnPassantCapture = to
 		p.EnPassantTarget = (from + to) / 2
-		pieceBB := p.pieceBitboardFor(piece)
-		pieceColorOcc := p.colorOccupancy(piece)
-		occDelta ^= p.movePieceBB(pieceBB, pieceColorOcc, from, to)
+		moveBB := p.pieceBitboardFor(piece)
+		delta := Bitboard(1)<<from | Bitboard(1)<<to
+		*moveBB ^= delta
+		*colorOcc ^= delta
+		occDelta ^= delta
 		evalDelta -= signedPieceValue(piece, from)
 		evalDelta += signedPieceValue(piece, to)
 		hashDelta ^= hashDeltaMove(piece, from, to)
@@ -146,12 +161,16 @@ func (p *Position) Make(move types.Move) {
 		p.Board[to+1] = 0
 		p.Board[to-1] = rook
 		rookFrom, rookTo := to+1, to-1
-		pieceBB := p.pieceBitboardFor(piece)
-		pieceColorOcc := p.colorOccupancy(piece)
-		occDelta ^= p.movePieceBB(pieceBB, pieceColorOcc, from, to)
+		moveBB := p.pieceBitboardFor(piece)
+		delta := Bitboard(1)<<from | Bitboard(1)<<to
+		*moveBB ^= delta
+		*colorOcc ^= delta
+		occDelta ^= delta
 		rookBB := p.pieceBitboardFor(rook)
-		rookColorOcc := p.colorOccupancy(rook)
-		occDelta ^= p.movePieceBB(rookBB, rookColorOcc, rookFrom, rookTo)
+		rookDelta := Bitboard(1)<<rookFrom | Bitboard(1)<<rookTo
+		*rookBB ^= rookDelta
+		*colorOcc ^= rookDelta
+		occDelta ^= rookDelta
 		evalDelta -= signedPieceValue(piece, from)
 		evalDelta += signedPieceValue(piece, to)
 		evalDelta -= signedPieceValue(rook, rookFrom)
@@ -166,12 +185,16 @@ func (p *Position) Make(move types.Move) {
 		p.Board[to-2] = 0
 		p.Board[to+1] = rook
 		rookFrom, rookTo := to-2, to+1
-		pieceBB := p.pieceBitboardFor(piece)
-		pieceColorOcc := p.colorOccupancy(piece)
-		occDelta ^= p.movePieceBB(pieceBB, pieceColorOcc, from, to)
+		moveBB := p.pieceBitboardFor(piece)
+		delta := Bitboard(1)<<from | Bitboard(1)<<to
+		*moveBB ^= delta
+		*colorOcc ^= delta
+		occDelta ^= delta
 		rookBB := p.pieceBitboardFor(rook)
-		rookColorOcc := p.colorOccupancy(rook)
-		occDelta ^= p.movePieceBB(rookBB, rookColorOcc, rookFrom, rookTo)
+		rookDelta := Bitboard(1)<<rookFrom | Bitboard(1)<<rookTo
+		*rookBB ^= rookDelta
+		*colorOcc ^= rookDelta
+		occDelta ^= rookDelta
 		evalDelta -= signedPieceValue(piece, from)
 		evalDelta += signedPieceValue(piece, to)
 		evalDelta -= signedPieceValue(rook, rookFrom)
@@ -188,13 +211,22 @@ func (p *Position) Make(move types.Move) {
 			promoPiece = piece | types.Queen
 		}
 		p.Board[to] = promoPiece
-		pieceColorOcc := p.colorOccupancy(piece)
-		occDelta ^= p.removePieceBB(p.pieceBitboardFor(piece), pieceColorOcc, from)
-		promoColorOcc := p.colorOccupancy(promoPiece)
-		occDelta ^= p.addPieceBB(p.pieceBitboardFor(promoPiece), promoColorOcc, to)
+		// Clear pawn at from.
+		fromDelta := Bitboard(1) << from
+		*p.pieceBitboardFor(piece) &^= fromDelta
+		*colorOcc &^= fromDelta
+		occDelta ^= fromDelta
+		// Set promoted piece at to.
+		toDelta := Bitboard(1) << to
+		*p.pieceBitboardFor(promoPiece) |= toDelta
+		*colorOcc |= toDelta
+		occDelta ^= toDelta
+		// Clear captured if any.
 		if move.Captured != 0 {
 			capColorOcc := p.colorOccupancy(move.Captured)
-			occDelta ^= p.removePieceBB(p.pieceBitboardFor(move.Captured), capColorOcc, to)
+			*p.pieceBitboardFor(move.Captured) &^= toDelta
+			*capColorOcc &^= toDelta
+			occDelta ^= toDelta
 		}
 		evalDelta -= signedPieceValue(piece, from)
 		evalDelta += signedPieceValue(promoPiece, to)
@@ -210,12 +242,17 @@ func (p *Position) Make(move types.Move) {
 	default: // FlagNormal
 		p.Board[from] = 0
 		p.Board[to] = piece
-		pieceBB := p.pieceBitboardFor(piece)
-		pieceColorOcc := p.colorOccupancy(piece)
-		occDelta ^= p.movePieceBB(pieceBB, pieceColorOcc, from, to)
+		moveBB := p.pieceBitboardFor(piece)
+		delta := Bitboard(1)<<from | Bitboard(1)<<to
+		*moveBB ^= delta
+		*colorOcc ^= delta
+		occDelta ^= delta
 		if move.Captured != 0 {
 			capColorOcc := p.colorOccupancy(move.Captured)
-			occDelta ^= p.removePieceBB(p.pieceBitboardFor(move.Captured), capColorOcc, to)
+			capBB := p.pieceBitboardFor(move.Captured)
+			*capBB &^= Bitboard(1) << to
+			*capColorOcc &^= Bitboard(1) << to
+			occDelta ^= Bitboard(1) << to
 		}
 		evalDelta -= signedPieceValue(piece, from)
 		evalDelta += signedPieceValue(piece, to)
@@ -228,7 +265,8 @@ func (p *Position) Make(move types.Move) {
 		}
 	}
 
-	p.xorOccupancy(occDelta)
+	p.Occupied ^= occDelta
+	p.Empty = ^p.Occupied
 
 	p.EvalScore += evalDelta
 
@@ -327,10 +365,14 @@ func (p *Position) Unmake(move types.Move) {
 		p.Board[undo.captureSquare] = undo.captured
 		pawnBB := p.pieceBitboardFor(pawn)
 		pawnColorOcc := p.colorOccupancy(pawn)
-		occDelta ^= p.movePieceBB(pawnBB, pawnColorOcc, from, to) // reverse: to→from
-		capBB := p.pieceBitboardFor(undo.captured)
-		capColorOcc := p.colorOccupancy(undo.captured)
-		occDelta ^= p.addPieceBB(capBB, capColorOcc, undo.captureSquare)
+		delta := Bitboard(1)<<from | Bitboard(1)<<to
+		*pawnBB ^= delta
+		*pawnColorOcc ^= delta
+		occDelta ^= delta
+		capDelta := Bitboard(1) << undo.captureSquare
+		*p.pieceBitboardFor(undo.captured) |= capDelta
+		*p.colorOccupancy(undo.captured) |= capDelta
+		occDelta ^= capDelta
 
 	case types.FlagCastleK:
 		p.Board[from] = p.Board[to]
@@ -342,10 +384,16 @@ func (p *Position) Unmake(move types.Move) {
 		king := p.Board[from]
 		kingBB := p.pieceBitboardFor(king)
 		kingColorOcc := p.colorOccupancy(king)
-		occDelta ^= p.movePieceBB(kingBB, kingColorOcc, from, to) // reverse: to→from
+		kingDelta := Bitboard(1)<<from | Bitboard(1)<<to
+		*kingBB ^= kingDelta
+		*kingColorOcc ^= kingDelta
+		occDelta ^= kingDelta
 		rookBB := p.pieceBitboardFor(rook)
 		rookColorOcc := p.colorOccupancy(rook)
-		occDelta ^= p.movePieceBB(rookBB, rookColorOcc, rookFrom, rookTo) // reverse: rookTo→rookFrom
+		rookDelta := Bitboard(1)<<rookFrom | Bitboard(1)<<rookTo
+		*rookBB ^= rookDelta
+		*rookColorOcc ^= rookDelta
+		occDelta ^= rookDelta
 
 	case types.FlagCastleQ:
 		p.Board[from] = p.Board[to]
@@ -357,10 +405,16 @@ func (p *Position) Unmake(move types.Move) {
 		king := p.Board[from]
 		kingBB := p.pieceBitboardFor(king)
 		kingColorOcc := p.colorOccupancy(king)
-		occDelta ^= p.movePieceBB(kingBB, kingColorOcc, from, to) // reverse: to→from
+		kingDelta := Bitboard(1)<<from | Bitboard(1)<<to
+		*kingBB ^= kingDelta
+		*kingColorOcc ^= kingDelta
+		occDelta ^= kingDelta
 		rookBB := p.pieceBitboardFor(rook)
 		rookColorOcc := p.colorOccupancy(rook)
-		occDelta ^= p.movePieceBB(rookBB, rookColorOcc, rookFrom, rookTo) // reverse: rookTo→rookFrom
+		rookDelta := Bitboard(1)<<rookFrom | Bitboard(1)<<rookTo
+		*rookBB ^= rookDelta
+		*rookColorOcc ^= rookDelta
+		occDelta ^= rookDelta
 
 	case types.FlagPromotion:
 		color := p.Board[to] & types.ColorMask
@@ -368,14 +422,22 @@ func (p *Position) Unmake(move types.Move) {
 		promoPiece := p.Board[to]
 		p.Board[from] = pawn
 		p.Board[to] = undo.captured
-		// Bitboards: clear promoted piece at to, set pawn at from, restore captured if any.
 		promoColorOcc := p.colorOccupancy(promoPiece)
-		occDelta ^= p.removePieceBB(p.pieceBitboardFor(promoPiece), promoColorOcc, to)
-		pawnColorOcc := p.colorOccupancy(pawn)
-		occDelta ^= p.addPieceBB(p.pieceBitboardFor(pawn), pawnColorOcc, from)
+		toDelta := Bitboard(1) << to
+		*p.pieceBitboardFor(promoPiece) &^= toDelta
+		*promoColorOcc &^= toDelta
+		occDelta ^= toDelta
+		fromDelta := Bitboard(1) << from
+		*p.pieceBitboardFor(pawn) |= fromDelta
+		*p.colorOccupancy(pawn) |= fromDelta
+		occDelta ^= fromDelta
 		if undo.captured != 0 {
-			capColorOcc := p.colorOccupancy(undo.captured)
-			occDelta ^= p.addPieceBB(p.pieceBitboardFor(undo.captured), capColorOcc, to)
+			*p.pieceBitboardFor(undo.captured) |= toDelta
+			*p.colorOccupancy(undo.captured) |= toDelta
+			// occDelta already has toDelta from the promo clear above;
+			// adding the captured piece back cancels it out (XOR), so
+			// we need to XOR again to cancel the cancel.
+			occDelta ^= toDelta
 		}
 
 	default: // FlagNormal, FlagDoublePush
@@ -384,14 +446,20 @@ func (p *Position) Unmake(move types.Move) {
 		p.Board[to] = undo.captured
 		pieceBB := p.pieceBitboardFor(piece)
 		pieceColorOcc := p.colorOccupancy(piece)
-		occDelta ^= p.movePieceBB(pieceBB, pieceColorOcc, from, to) // reverse: to→from
+		delta := Bitboard(1)<<from | Bitboard(1)<<to
+		*pieceBB ^= delta
+		*pieceColorOcc ^= delta
+		occDelta ^= delta
 		if undo.captured != 0 {
-			capColorOcc := p.colorOccupancy(undo.captured)
-			occDelta ^= p.addPieceBB(p.pieceBitboardFor(undo.captured), capColorOcc, to)
+			capDelta := Bitboard(1) << to
+			*p.pieceBitboardFor(undo.captured) |= capDelta
+			*p.colorOccupancy(undo.captured) |= capDelta
+			occDelta ^= capDelta
 		}
 	}
 
-	p.xorOccupancy(occDelta)
+	p.Occupied ^= occDelta
+	p.Empty = ^p.Occupied
 
 	// Restore cached king square if the king was the moving piece.
 	movedPiece := p.Board[from]
