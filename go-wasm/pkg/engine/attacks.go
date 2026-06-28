@@ -23,102 +23,67 @@ func (p *Position) IsInCheck(color types.Piece) bool {
 	if kingIdx == -1 {
 		return false
 	}
-	return p.IsSquareAttacked(kingIdx, oppositeColor(color))
+	return p.attackersTo(kingIdx, oppositeColor(color)) != 0
 }
 
 // IsSquareAttacked reports whether `idx` is attacked by any piece of `byColor`.
-// It scans outward from the target square (reverse scan): pawn diagonals,
-// knight L-jumps, king one-steps, then rook/bishop sliding rays.
-//
-// Reverse scan (from the target, looking outward) is faster than iterating
-// all enemy pieces because we stop as soon as we find one attacker per ray.
+// Delegates to attackersTo (bitboard-based) and checks if any attacker exists.
 func (p *Position) IsSquareAttacked(idx int, byColor types.Piece) bool {
-	row, col := idx/boardSize, idx%boardSize
+	return p.attackersTo(idx, byColor) != 0
+}
 
-	// 1. Pawn attacks — a pawn of `byColor` sits one rank "behind" its attack
-	//    direction. White pawns attack upward, so they sit at idx-9 / idx-7.
-	pawnRowOffset := -1
-	if byColor == types.ColorBlack {
-		pawnRowOffset = 1
-	}
-	for dc := -1; dc <= 1; dc += 2 {
-		r, c := row+pawnRowOffset, col+dc
-		if r < 0 || r > 7 || c < 0 || c > 7 {
-			continue
-		}
-		t := r*boardSize + c
-		if p.Board[t].TypePiece() == types.Pawn && p.Board[t].Color() == byColor {
-			return true
-		}
-	}
+// attackersTo returns a bitboard of all squares from which a piece of `byColor`
+// attacks the square `idx`. This replaces the old reverse-scan approach with
+// parallel bitboard operations: one AND per piece type, OR'd together.
+//
+// Pawn attacks: a white pawn on X attacks X+7 and X+9. So white pawns
+// attacking `idx` are on idx-7 (if idx is not on file H) and idx-9 (if idx
+// is not on file A). Black pawns attacking `idx` are on idx+9 and idx+7
+// (mirrored). We shift a single-bit bitboard at `idx` in the reverse
+// direction and AND with the enemy pawn bitboard.
+//
+// Knight/King: use precomputed attack tables — knightAttacks[idx] gives all
+// squares a knight on idx attacks, so AND with enemy knights gives attackers.
+//
+// Sliders: use magic bitboard lookups — bishopAttacksBB(idx, occ) gives all
+// squares a bishop on idx attacks, AND with enemy bishops+queens gives
+// diagonal attackers. Same for rooks.
+func (p *Position) attackersTo(idx int, byColor types.Piece) Bitboard {
+	sqBB := Bitboard(1) << idx
 
-	// 2. Knight L-jumps.
-	for _, dir := range knightDirections {
-		t := idx + dir
-		if !inBounds(t) {
-			continue
-		}
-		if abs(t/boardSize-row) == 2 && abs(t%boardSize-col) == 1 ||
-			abs(t/boardSize-row) == 1 && abs(t%boardSize-col) == 2 {
-			if p.Board[t].TypePiece() == types.Knight && p.Board[t].Color() == byColor {
-				return true
-			}
-		}
+	var pawns, knights, bishops, rooks, queens, king Bitboard
+	if byColor == types.ColorWhite {
+		pawns, knights, bishops, rooks, queens, king = p.WhitePawns, p.WhiteKnights, p.WhiteBishops, p.WhiteRooks, p.WhiteQueens, p.WhiteKing
+	} else {
+		pawns, knights, bishops, rooks, queens, king = p.BlackPawns, p.BlackKnights, p.BlackBishops, p.BlackRooks, p.BlackQueens, p.BlackKing
 	}
 
-	// 3. King one-step (8 adjacent squares).
-	for _, dir := range kingDirections {
-		t := idx + dir
-		if !inBounds(t) {
-			continue
-		}
-		if abs(t/boardSize-row) <= 1 && abs(t%boardSize-col) <= 1 {
-			if p.Board[t].TypePiece() == types.King && p.Board[t].Color() == byColor {
-				return true
-			}
-		}
+	var attackers Bitboard
+
+	// Pawn attackers: shift sqBB backward to find where attacking pawns would sit.
+	// White pawns attack +7 (NW) and +9 (NE), so attackers of idx are at idx-7 and idx-9.
+	// Black pawns attack -7 (SE) and -9 (SW), so attackers of idx are at idx+7 and idx+9.
+	if byColor == types.ColorWhite {
+		attackers |= (sqBB >> 7) & notA & pawns  // white pawn at sq-7 (NW), must not be on file A
+		attackers |= (sqBB >> 9) & notH & pawns  // white pawn at sq-9 (NE), must not be on file H
+	} else {
+		attackers |= (sqBB << 9) & notA & pawns  // black pawn at sq+9 (SE), must not be on file A
+		attackers |= (sqBB << 7) & notH & pawns  // black pawn at sq+7 (SW), must not be on file H
 	}
 
-	// 4. Rook / Queen sliding (orthogonal rays).
-	for _, dir := range rookDirections {
-		isHorizontal := dir == -1 || dir == 1
+	// Knight attackers.
+	attackers |= knightAttacks[idx] & knights
 
-		for target := idx + dir; inBounds(target); target += dir {
-			if isHorizontal && target/boardSize != row {
-				break
-			}
-			if p.Board[target] == 0 {
-				continue
-			}
+	// King attackers.
+	attackers |= kingAttacks[idx] & king
 
-			if (p.Board[target].TypePiece() == types.Rook || p.Board[target].TypePiece() == types.Queen) && p.Board[target].Color() == byColor {
-				return true
-			}
-			break
-		}
-	}
+	// Bishop/queen attackers (diagonal sliders).
+	diagAttackers := bishopAttacksBB(idx, p.Occupied)
+	attackers |= diagAttackers & (bishops | queens)
 
-	// 5. Bishop / Queen sliding (diagonal rays).
-	for _, dir := range bishopDirections {
-		prevCol := idx % boardSize
+	// Rook/queen attackers (orthogonal sliders).
+	orthoAttackers := rookAttacksBB(idx, p.Occupied)
+	attackers |= orthoAttackers & (rooks | queens)
 
-		for target := idx + dir; inBounds(target); target += dir {
-			curCol := target % boardSize
-
-			if abs(curCol-prevCol) != 1 {
-				break
-			}
-			prevCol = curCol
-
-			if p.Board[target] == 0 {
-				continue
-			}
-
-			if (p.Board[target].TypePiece() == types.Bishop || p.Board[target].TypePiece() == types.Queen) && p.Board[target].Color() == byColor {
-				return true
-			}
-			break
-		}
-	}
-	return false
+	return attackers
 }

@@ -2,9 +2,8 @@ package engine
 
 import "webassemble/pkg/types"
 
-var kingDirections = [8]int{-1, 1, 8, -8, 7, -7, 9, -9}
-
-// MoveKing generates one-step king moves plus castling (kingside & queenside).
+// MoveKing generates one-step king moves using precomputed bitboard attack
+// tables, plus castling (kingside & queenside).
 //
 // Castling checks all 6 FIDE conditions:
 //  1. Castling rights still present (tracked in p.CastlingRights)
@@ -16,28 +15,24 @@ var kingDirections = [8]int{-1, 1, 8, -8, 7, -7, 9, -9}
 //
 // The rook move itself is applied in MakeMove (not here).
 func (p *Position) MoveKing(piece types.Piece, i int, ml *MoveList) {
-	startRow, startCol := i/boardSize, i%boardSize
+	var ownPieces Bitboard
+	if piece.Color() == types.ColorWhite {
+		ownPieces = p.WhitePieces
+	} else {
+		ownPieces = p.BlackPieces
+	}
 
-	// Normal one-step king moves.
-	for _, dir := range kingDirections {
-		target := i + dir
-		if !inBounds(target) {
-			continue
-		}
+	targets := kingAttacks[i] & ^ownPieces
 
-		rowDiff := abs(target/boardSize - startRow)
-		colDiff := abs(target%boardSize - startCol)
-		if rowDiff > 1 || colDiff > 1 {
-			continue
-		}
+	for targets != 0 {
+		to := bitscan(targets)
+		targets &= targets - 1
 
-		if p.Board[target] == 0 {
-			ml.Add(types.Move{From: i, To: target, Flag: types.FlagNormal})
-			continue
+		move := types.Move{From: i, To: to, Flag: types.FlagNormal}
+		if captured := p.Board[to]; captured != 0 {
+			move.Captured = captured
 		}
-		if piece.IsEnemy(p.Board[target]) {
-			ml.Add(types.Move{From: i, To: target, Flag: types.FlagNormal, Captured: p.Board[target]})
-		}
+		ml.Add(move)
 	}
 
 	p.generateCastling(piece, ml)

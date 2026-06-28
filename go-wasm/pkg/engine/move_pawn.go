@@ -5,66 +5,111 @@ import "webassemble/pkg/types"
 // MovePawn generates pawn moves: single push, double push, captures,
 // en passant, and promotions (4 moves per promotable push: Q/N/B/R).
 //
-// Direction convention: white pawns move "up" the board (toward index 0,
-// because rank 8 is index 0). dir = -boardSize means -8.
+// Uses bitboard shifts for move computation. White pawns move toward higher
+// indices (<< 8); black pawns move toward lower indices (>> 8).
 func (p *Position) MovePawn(piece types.Piece, i int, ml *MoveList) {
-	row := i / boardSize
-	col := i % boardSize
 	isWhite := piece&types.ColorWhite == types.ColorWhite
 	myColor := piece.Color()
+	row := i / boardSize
 
-	dir, startRow, promotionRow := -boardSize, 6, 1
+	pawnBB := Bitboard(1) << i
+
+	var enemyPieces, empty Bitboard
 	if isWhite {
-		dir, startRow, promotionRow = boardSize, 1, 6
+		enemyPieces = p.BlackPieces
+	} else {
+		enemyPieces = p.WhitePieces
+	}
+	empty = p.Empty
+
+	// Promotion rank: white promotes on row 7 (rank 8), black on row 0 (rank 1).
+	promotionRow := 7
+	if !isWhite {
+		promotionRow = 0
 	}
 
-	// Single + Double forward push (only if the square is empty).
-	if forward := i + dir; inBounds(forward) && p.Board[forward] == 0 {
-		if row == promotionRow {
-			promotionPawn(i, forward, myColor, 0, ml)
-		} else {
-			ml.Add(types.Move{From: i, To: forward})
-		}
-
-		if row == startRow {
-			if double := i + 2*dir; p.Board[double] == 0 {
-				ml.Add(types.Move{From: i, To: double, Flag: types.FlagDoublePush})
+	if isWhite {
+		// Single push.
+		single := (pawnBB << 8) & empty
+		if single != 0 {
+			to := bitscan(single)
+			toRow := to / boardSize
+			if toRow == promotionRow {
+				promotionPawn(i, to, myColor, 0, ml)
+			} else {
+				ml.Add(types.Move{From: i, To: to})
+			}
+			// Double push from rank 2 (row 1).
+			if row == 1 {
+				double := (single << 8) & empty
+				if double != 0 {
+					ml.Add(types.Move{From: i, To: bitscan(double), Flag: types.FlagDoublePush})
+				}
 			}
 		}
-	}
 
-	// En passant availability: our pawn must sit next to the pawn that just
-	// did a double push (same rank, adjacent file).
-	canCaptureEnPassant := p.EnPassantCapture != -1 &&
-		i/boardSize == p.EnPassantCapture/boardSize &&
-		abs(i%boardSize-p.EnPassantCapture%boardSize) == 1
+		// Captures: NW (<< 7, file-1) and NE (<< 9, file+1).
+		captures := ((pawnBB & notA) << 7) & enemyPieces
+		captures |= ((pawnBB & notH) << 9) & enemyPieces
+		for captures != 0 {
+			to := bitscan(captures)
+			captures &= captures - 1
+			toRow := to / boardSize
+			if toRow == promotionRow {
+				promotionPawn(i, to, myColor, p.Board[to], ml)
+			} else {
+				ml.Add(types.Move{From: i, To: to, Flag: types.FlagNormal, Captured: p.Board[to]})
+			}
+		}
 
-	// Diagonal captures (both directions). En passant and capture-promotions
-	for _, dc := range []int{1, -1} {
-		if dc == 1 && col == boardSize-1 {
-			continue
+		// En passant.
+		if p.EnPassantTarget != -1 {
+			epBB := ((pawnBB & notA) << 7) | ((pawnBB & notH) << 9)
+			if epBB&(1<<p.EnPassantTarget) != 0 {
+				ml.Add(types.Move{From: i, To: p.EnPassantTarget, Flag: types.FlagEnPassant, Captured: p.Board[p.EnPassantCapture]})
+			}
 		}
-		if dc == -1 && col == 0 {
-			continue
+	} else {
+		// Single push.
+		single := (pawnBB >> 8) & empty
+		if single != 0 {
+			to := bitscan(single)
+			toRow := to / boardSize
+			if toRow == promotionRow {
+				promotionPawn(i, to, myColor, 0, ml)
+			} else {
+				ml.Add(types.Move{From: i, To: to})
+			}
+			// Double push from rank 7 (row 6).
+			if row == 6 {
+				double := (single >> 8) & empty
+				if double != 0 {
+					ml.Add(types.Move{From: i, To: bitscan(double), Flag: types.FlagDoublePush})
+				}
+			}
 		}
-		t := i + dir + dc
-		if !inBounds(t) {
-			continue
-		}
-		target := p.Board[t]
 
-		if canCaptureEnPassant && t == p.EnPassantTarget { // en passant (target square is empty)
-			ml.Add(types.Move{From: i, To: t, Flag: types.FlagEnPassant, Captured: p.Board[p.EnPassantCapture]})
-			continue
+		// Captures: SE (>> 7, file+1) and SW (>> 9, file-1).
+		captures := ((pawnBB & notH) >> 7) & enemyPieces
+		captures |= ((pawnBB & notA) >> 9) & enemyPieces
+		for captures != 0 {
+			to := bitscan(captures)
+			captures &= captures - 1
+			toRow := to / boardSize
+			if toRow == promotionRow {
+				promotionPawn(i, to, myColor, p.Board[to], ml)
+			} else {
+				ml.Add(types.Move{From: i, To: to, Flag: types.FlagNormal, Captured: p.Board[to]})
+			}
 		}
-		if !piece.IsEnemy(target) { // rejects empty squares and friendly pieces
-			continue
+
+		// En passant.
+		if p.EnPassantTarget != -1 {
+			epBB := ((pawnBB & notH) >> 7) | ((pawnBB & notA) >> 9)
+			if epBB&(1<<p.EnPassantTarget) != 0 {
+				ml.Add(types.Move{From: i, To: p.EnPassantTarget, Flag: types.FlagEnPassant, Captured: p.Board[p.EnPassantCapture]})
+			}
 		}
-		if row == promotionRow { // capture-promotion
-			promotionPawn(i, t, myColor, target, ml)
-			continue
-		}
-		ml.Add(types.Move{From: i, To: t, Flag: types.FlagNormal, Captured: target}) // normal capture
 	}
 }
 

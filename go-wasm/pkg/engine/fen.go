@@ -124,14 +124,14 @@ func (p *Position) LoadFen(fen string) {
 		p.FullmoveNumber = 1
 	}
 
-	// Compute the initial incremental evaluation score.
+	// Build the bitboards from the mailbox (must run before eval init
+	// so we can iterate piece bitboards instead of scanning 64 squares).
+	p.updateBitboards()
+
+	// Compute the initial incremental evaluation score by iterating
+	// over piece bitboards (only set bits = actual pieces).
 	p.EvalScore = 0
-	for i, piece := range p.Board {
-		if piece == 0 {
-			continue
-		}
-		p.EvalScore += signedPieceValue(piece, i)
-	}
+	p.evalFromBitboards()
 
 	// Compute the initial Zobrist hash.
 	p.Hash = p.ComputeHash()

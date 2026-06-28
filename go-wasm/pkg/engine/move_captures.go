@@ -8,154 +8,169 @@ import "webassemble/pkg/types"
 // "noisy" moves, avoiding the horizon effect where a hanging piece appears
 // safe just because the capture is past the depth cutoff.
 //
-// Writes into the caller-owned MoveList — zero heap allocation.
+// Uses bitboard operations: magic lookups for sliders, precomputed tables
+// for knights/kings, shift-based for pawns. Only iterates over actual pieces.
 func (p *Position) PseudoLegalCaptures(ml *MoveList) {
 	ml.Clear()
-	for i, piece := range p.Board {
-		if piece == 0 || piece.IsWhite() != p.WhiteToMove {
-			continue
-		}
 
-		switch piece & types.TypeMask {
-		case types.Pawn:
-			p.capturePawn(piece, i, ml)
-		case types.Rook:
-			p.captureSlider(piece, i, ml, rookDirections[:], false)
-		case types.Bishop:
-			p.captureSlider(piece, i, ml, bishopDirections[:], true)
-		case types.Queen:
-			p.captureSlider(piece, i, ml, rookDirections[:], false)
-			p.captureSlider(piece, i, ml, bishopDirections[:], true)
-		case types.King:
-			p.captureKing(piece, i, ml)
-		case types.Knight:
-			p.captureKnight(piece, i, ml)
+	var pawns, knights, bishops, rooks, queens, king, ownPieces, enemyPieces Bitboard
+	var color types.Piece
+	if p.WhiteToMove {
+		pawns, knights, bishops, rooks, queens, king = p.WhitePawns, p.WhiteKnights, p.WhiteBishops, p.WhiteRooks, p.WhiteQueens, p.WhiteKing
+		ownPieces, enemyPieces = p.WhitePieces, p.BlackPieces
+		color = types.ColorWhite
+	} else {
+		pawns, knights, bishops, rooks, queens, king = p.BlackPawns, p.BlackKnights, p.BlackBishops, p.BlackRooks, p.BlackQueens, p.BlackKing
+		ownPieces, enemyPieces = p.BlackPieces, p.WhitePieces
+		color = types.ColorBlack
+	}
+
+	// Pawn captures + en passant + promotion pushes.
+	bb := pawns
+	for bb != 0 {
+		i := bitscan(bb)
+		bb &= bb - 1
+		p.capturePawnBB(color|types.Pawn, i, ml, enemyPieces)
+	}
+
+	// Knight captures.
+	bb = knights
+	for bb != 0 {
+		i := bitscan(bb)
+		bb &= bb - 1
+		targets := knightAttacks[i] & enemyPieces
+		for targets != 0 {
+			to := bitscan(targets)
+			targets &= targets - 1
+			ml.Add(types.Move{From: i, To: to, Flag: types.FlagNormal, Captured: p.Board[to]})
 		}
 	}
+
+	// Bishop captures.
+	bb = bishops
+	for bb != 0 {
+		i := bitscan(bb)
+		bb &= bb - 1
+		targets := bishopAttacksBB(i, p.Occupied) & enemyPieces
+		for targets != 0 {
+			to := bitscan(targets)
+			targets &= targets - 1
+			ml.Add(types.Move{From: i, To: to, Flag: types.FlagNormal, Captured: p.Board[to]})
+		}
+	}
+
+	// Rook captures.
+	bb = rooks
+	for bb != 0 {
+		i := bitscan(bb)
+		bb &= bb - 1
+		targets := rookAttacksBB(i, p.Occupied) & enemyPieces
+		for targets != 0 {
+			to := bitscan(targets)
+			targets &= targets - 1
+			ml.Add(types.Move{From: i, To: to, Flag: types.FlagNormal, Captured: p.Board[to]})
+		}
+	}
+
+	// Queen captures (rook + bishop attacks).
+	bb = queens
+	for bb != 0 {
+		i := bitscan(bb)
+		bb &= bb - 1
+		targets := (rookAttacksBB(i, p.Occupied) | bishopAttacksBB(i, p.Occupied)) & enemyPieces
+		for targets != 0 {
+			to := bitscan(targets)
+			targets &= targets - 1
+			ml.Add(types.Move{From: i, To: to, Flag: types.FlagNormal, Captured: p.Board[to]})
+		}
+	}
+
+	// King captures.
+	if king != 0 {
+		i := bitscan(king)
+		targets := kingAttacks[i] & enemyPieces
+		for targets != 0 {
+			to := bitscan(targets)
+			targets &= targets - 1
+			ml.Add(types.Move{From: i, To: to, Flag: types.FlagNormal, Captured: p.Board[to]})
+		}
+	}
+
+	_ = ownPieces
 }
 
-// capturePawn generates only pawn captures, en passant, and capture-promotions.
-func (p *Position) capturePawn(piece types.Piece, i int, ml *MoveList) {
-	row := i / boardSize
-	col := i % boardSize
+// capturePawnBB generates pawn captures, en passant, and promotion pushes
+// using bitboard shifts. This is the bitboard version of capturePawn.
+func (p *Position) capturePawnBB(piece types.Piece, i int, ml *MoveList, enemyPieces Bitboard) {
 	isWhite := piece&types.ColorWhite == types.ColorWhite
 	myColor := piece.Color()
+	row := i / boardSize
+	pawnBB := Bitboard(1) << i
 
-	dir, promotionRow := -boardSize, 1
+	promotionRow := 7
+	if !isWhite {
+		promotionRow = 0
+	}
+
 	if isWhite {
-		dir, promotionRow = boardSize, 6
-	}
-
-	canCaptureEnPassant := p.EnPassantCapture != -1 &&
-		i/boardSize == p.EnPassantCapture/boardSize &&
-		abs(i%boardSize-p.EnPassantCapture%boardSize) == 1
-
-	for _, dc := range []int{1, -1} {
-		if dc == 1 && col == boardSize-1 {
-			continue
-		}
-		if dc == -1 && col == 0 {
-			continue
-		}
-		t := i + dir + dc
-		if !inBounds(t) {
-			continue
-		}
-		target := p.Board[t]
-
-		if canCaptureEnPassant && t == p.EnPassantTarget {
-			ml.Add(types.Move{From: i, To: t, Flag: types.FlagEnPassant, Captured: p.Board[p.EnPassantCapture]})
-			continue
-		}
-		if !piece.IsEnemy(target) {
-			continue
-		}
-		if row == promotionRow {
-			promotionPawn(i, t, myColor, target, ml)
-			continue
-		}
-		ml.Add(types.Move{From: i, To: t, Flag: types.FlagNormal, Captured: target})
-	}
-
-	// Promotion pushes (non-capturing) — a pawn promoting to queen is a
-	// material change worth searching in quiescence.
-	if forward := i + dir; inBounds(forward) && p.Board[forward] == 0 && row == promotionRow {
-		promotionPawn(i, forward, myColor, 0, ml)
-	}
-}
-
-// captureSlider generates only captures along sliding directions.
-func (p *Position) captureSlider(piece types.Piece, i int, ml *MoveList, directions []int, diagonal bool) {
-	startRow := i / boardSize
-
-	for _, dir := range directions {
-		isHorizontal := dir == -1 || dir == 1
-
-		for target := i + dir; inBounds(target); target += dir {
-			if !diagonal && isHorizontal && target/boardSize != startRow {
-				break
+		// Captures: NW (<< 7, file-1) and NE (<< 9, file+1).
+		captures := ((pawnBB & notA) << 7) & enemyPieces
+		captures |= ((pawnBB & notH) << 9) & enemyPieces
+		for captures != 0 {
+			to := bitscan(captures)
+			captures &= captures - 1
+			toRow := to / boardSize
+			if toRow == promotionRow {
+				promotionPawn(i, to, myColor, p.Board[to], ml)
+			} else {
+				ml.Add(types.Move{From: i, To: to, Flag: types.FlagNormal, Captured: p.Board[to]})
 			}
-			if diagonal {
-				col := target % boardSize
-				prevCol := (target - dir) % boardSize
-				if abs(col-prevCol) != 1 {
-					break
-				}
+		}
+
+		// En passant.
+		if p.EnPassantTarget != -1 {
+			epBB := ((pawnBB & notA) << 7) | ((pawnBB & notH) << 9)
+			if epBB&(1<<p.EnPassantTarget) != 0 {
+				ml.Add(types.Move{From: i, To: p.EnPassantTarget, Flag: types.FlagEnPassant, Captured: p.Board[p.EnPassantCapture]})
 			}
+		}
 
-			if p.Board[target] == 0 {
-				continue
+		// Promotion pushes (non-capturing) — material change worth searching.
+		if row == promotionRow-1 { // rank 7 (row 6) for white
+			push := (pawnBB << 8) & p.Empty
+			if push != 0 {
+				promotionPawn(i, bitscan(push), myColor, 0, ml)
 			}
-
-			if piece.IsEnemy(p.Board[target]) {
-				ml.Add(types.Move{From: i, To: target, Flag: types.FlagNormal, Captured: p.Board[target]})
+		}
+	} else {
+		// Captures: SE (>> 7, file+1) and SW (>> 9, file-1).
+		captures := ((pawnBB & notH) >> 7) & enemyPieces
+		captures |= ((pawnBB & notA) >> 9) & enemyPieces
+		for captures != 0 {
+			to := bitscan(captures)
+			captures &= captures - 1
+			toRow := to / boardSize
+			if toRow == promotionRow {
+				promotionPawn(i, to, myColor, p.Board[to], ml)
+			} else {
+				ml.Add(types.Move{From: i, To: to, Flag: types.FlagNormal, Captured: p.Board[to]})
 			}
-			break
-		}
-	}
-}
-
-// captureKnight generates only knight captures.
-func (p *Position) captureKnight(piece types.Piece, i int, ml *MoveList) {
-	startRow, startCol := i/boardSize, i%boardSize
-
-	for _, dir := range knightDirections {
-		target := i + dir
-		if !inBounds(target) {
-			continue
 		}
 
-		rowDiff := abs(target/boardSize - startRow)
-		colDiff := abs(target%boardSize - startCol)
-
-		if !((rowDiff == 1 && colDiff == 2) || (rowDiff == 2 && colDiff == 1)) {
-			continue
+		// En passant.
+		if p.EnPassantTarget != -1 {
+			epBB := ((pawnBB & notH) >> 7) | ((pawnBB & notA) >> 9)
+			if epBB&(1<<p.EnPassantTarget) != 0 {
+				ml.Add(types.Move{From: i, To: p.EnPassantTarget, Flag: types.FlagEnPassant, Captured: p.Board[p.EnPassantCapture]})
+			}
 		}
 
-		if piece.IsEnemy(p.Board[target]) {
-			ml.Add(types.Move{From: i, To: target, Flag: types.FlagNormal, Captured: p.Board[target]})
-		}
-	}
-}
-
-// captureKing generates only king captures (no castling — castling is quiet).
-func (p *Position) captureKing(piece types.Piece, i int, ml *MoveList) {
-	startRow, startCol := i/boardSize, i%boardSize
-
-	for _, dir := range kingDirections {
-		target := i + dir
-		if !inBounds(target) {
-			continue
-		}
-
-		rowDiff := abs(target/boardSize - startRow)
-		colDiff := abs(target%boardSize - startCol)
-		if rowDiff > 1 || colDiff > 1 {
-			continue
-		}
-
-		if piece.IsEnemy(p.Board[target]) {
-			ml.Add(types.Move{From: i, To: target, Flag: types.FlagNormal, Captured: p.Board[target]})
+		// Promotion pushes (non-capturing).
+		if row == promotionRow+1 { // rank 2 (row 1) for black
+			push := (pawnBB >> 8) & p.Empty
+			if push != 0 {
+				promotionPawn(i, bitscan(push), myColor, 0, ml)
+			}
 		}
 	}
 }

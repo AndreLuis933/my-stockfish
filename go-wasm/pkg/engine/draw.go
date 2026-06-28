@@ -1,7 +1,5 @@
 package engine
 
-import "webassemble/pkg/types"
-
 // IsRepetition returns true if the current position has occurred at least
 // twice before in the current search tree (threefold repetition). Scans the
 // undo stack hashes backwards in steps of 2 (only same-side-to-move
@@ -61,69 +59,21 @@ func (p *Position) IsFiftyMoveRule() bool {
 //   - King + Knight vs King
 //   - King + Bishop vs King + Bishop (same color bishops)
 //
-// Zero-allocation: bishop square colors are tracked as int8 pairs, not slices.
+// Uses bitboard popcounts — no 64-square scan.
 func (p *Position) IsInsufficientMaterial() bool {
-	var whiteBishopSq, blackBishopSq int
-	whiteBishops := 0
-	blackBishops := 0
-	whiteKnights := 0
-	blackKnights := 0
-	whitePawns := 0
-	blackPawns := 0
-	whiteRooks := 0
-	blackRooks := 0
-	whiteQueens := 0
-	blackQueens := 0
-
-	for sq, piece := range p.Board {
-		if piece == 0 {
-			continue
-		}
-		isWhite := piece&types.ColorMask == types.ColorWhite
-		switch piece & types.TypeMask {
-		case types.Pawn:
-			if isWhite {
-				whitePawns++
-			} else {
-				blackPawns++
-			}
-		case types.Knight:
-			if isWhite {
-				whiteKnights++
-			} else {
-				blackKnights++
-			}
-		case types.Bishop:
-			if isWhite {
-				whiteBishops++
-				whiteBishopSq = sq
-			} else {
-				blackBishops++
-				blackBishopSq = sq
-			}
-		case types.Rook:
-			if isWhite {
-				whiteRooks++
-			} else {
-				blackRooks++
-			}
-		case types.Queen:
-			if isWhite {
-				whiteQueens++
-			} else {
-				blackQueens++
-			}
-		}
-	}
-
 	// Any pawn, rook, or queen → sufficient material.
-	if whitePawns > 0 || blackPawns > 0 ||
-		whiteRooks > 0 || blackRooks > 0 ||
-		whiteQueens > 0 || blackQueens > 0 {
+	if p.WhitePawns != 0 || p.BlackPawns != 0 ||
+		p.WhiteRooks != 0 || p.BlackRooks != 0 ||
+		p.WhiteQueens != 0 || p.BlackQueens != 0 {
 		return false
 	}
 
-	totalMinor := whiteKnights + blackKnights + whiteBishops + blackBishops
+	wN := popcount(p.WhiteKnights)
+	bN := popcount(p.BlackKnights)
+	wB := popcount(p.WhiteBishops)
+	bB := popcount(p.BlackBishops)
+
+	totalMinor := wN + bN + wB + bB
 
 	// K vs K
 	if totalMinor == 0 {
@@ -136,9 +86,11 @@ func (p *Position) IsInsufficientMaterial() bool {
 	}
 
 	// K + B vs K + B with same-color bishops
-	if totalMinor == 2 && whiteBishops == 1 && blackBishops == 1 {
-		wbColor := (whiteBishopSq/8 + whiteBishopSq%8) % 2
-		bbColor := (blackBishopSq/8 + blackBishopSq%8) % 2
+	if totalMinor == 2 && wB == 1 && bB == 1 {
+		wbSq := bitscan(p.WhiteBishops)
+		bbSq := bitscan(p.BlackBishops)
+		wbColor := (wbSq/8 + wbSq%8) % 2
+		bbColor := (bbSq/8 + bbSq%8) % 2
 		return wbColor == bbColor
 	}
 

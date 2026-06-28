@@ -2,30 +2,25 @@ package engine
 
 import "webassemble/pkg/types"
 
-var bishopDirections = [4]int{-boardSize - 1, -boardSize + 1, boardSize - 1, boardSize + 1}
-
-// MoveBishop slides along the 4 diagonals until it hits a piece or the edge.
+// MoveBishop generates bishop moves using magic bitboard lookup.
 func (p *Position) MoveBishop(piece types.Piece, i int, ml *MoveList) {
-	for _, dir := range bishopDirections {
-		prevCol := i % boardSize
+	var ownPieces Bitboard
+	if piece.Color() == types.ColorWhite {
+		ownPieces = p.WhitePieces
+	} else {
+		ownPieces = p.BlackPieces
+	}
 
-		for target := i + dir; inBounds(target); target += dir {
-			col := target % boardSize
+	targets := bishopAttacksBB(i, p.Occupied) & ^ownPieces
 
-			if abs(col-prevCol) != 1 {
-				break
-			}
-			prevCol = col
+	for targets != 0 {
+		to := bitscan(targets)
+		targets &= targets - 1
 
-			if p.Board[target] == 0 {
-				ml.Add(types.Move{From: i, To: target, Flag: types.FlagNormal})
-				continue
-			}
-
-			if piece.IsEnemy(p.Board[target]) {
-				ml.Add(types.Move{From: i, To: target, Flag: types.FlagNormal, Captured: p.Board[target]})
-			}
-			break
+		move := types.Move{From: i, To: to, Flag: types.FlagNormal}
+		if captured := p.Board[to]; captured != 0 {
+			move.Captured = captured
 		}
+		ml.Add(move)
 	}
 }

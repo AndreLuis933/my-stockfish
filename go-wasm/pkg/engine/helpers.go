@@ -15,10 +15,6 @@ func abs(n int) int {
 	return n
 }
 
-func inBounds(idx int) bool {
-	return idx >= 0 && idx < boardSize*boardSize
-}
-
 // oppositeColor returns the enemy color of the given piece color.
 func oppositeColor(color types.Piece) types.Piece {
 	if color&types.ColorMask == types.ColorBlack {

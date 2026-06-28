@@ -2,32 +2,25 @@ package engine
 
 import "webassemble/pkg/types"
 
-var knightDirections = [8]int{-6, 6, 10, -10, 17, -17, 15, -15}
-
-// MoveKnight generates the 8 L-shaped jumps, filtered by board edges.
+// MoveKnight generates knight moves using precomputed bitboard attack tables.
 func (p *Position) MoveKnight(piece types.Piece, i int, ml *MoveList) {
-	startRow, startCol := i/boardSize, i%boardSize
+	var ownPieces Bitboard
+	if piece.Color() == types.ColorWhite {
+		ownPieces = p.WhitePieces
+	} else {
+		ownPieces = p.BlackPieces
+	}
 
-	for _, dir := range knightDirections {
-		target := i + dir
-		if !inBounds(target) {
-			continue
+	targets := knightAttacks[i] & ^ownPieces
+
+	for targets != 0 {
+		to := bitscan(targets)
+		targets &= targets - 1
+
+		move := types.Move{From: i, To: to, Flag: types.FlagNormal}
+		if captured := p.Board[to]; captured != 0 {
+			move.Captured = captured
 		}
-
-		rowDiff := abs(target/boardSize - startRow)
-		colDiff := abs(target%boardSize - startCol)
-
-		if !((rowDiff == 1 && colDiff == 2) || (rowDiff == 2 && colDiff == 1)) {
-			continue
-		}
-
-		if p.Board[target] == 0 {
-			ml.Add(types.Move{From: i, To: target, Flag: types.FlagNormal})
-			continue
-		}
-
-		if piece.IsEnemy(p.Board[target]) {
-			ml.Add(types.Move{From: i, To: target, Flag: types.FlagNormal, Captured: p.Board[target]})
-		}
+		ml.Add(move)
 	}
 }

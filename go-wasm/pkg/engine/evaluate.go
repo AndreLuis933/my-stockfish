@@ -140,3 +140,31 @@ func signedPieceValue(piece types.Piece, square int) int {
 	}
 	return -pieceTotalValue(piece, square)
 }
+
+// evalFromBitboards computes the initial EvalScore by iterating over piece
+// bitboards (only set bits = actual pieces) instead of scanning all 64 squares.
+// Called once by LoadFen after bitboards are built.
+func (p *Position) evalFromBitboards() {
+	p.EvalScore += evalPieceBits(p.WhitePawns, types.Pawn|types.ColorWhite)
+	p.EvalScore += evalPieceBits(p.WhiteKnights, types.Knight|types.ColorWhite)
+	p.EvalScore += evalPieceBits(p.WhiteBishops, types.Bishop|types.ColorWhite)
+	p.EvalScore += evalPieceBits(p.WhiteRooks, types.Rook|types.ColorWhite)
+	p.EvalScore += evalPieceBits(p.WhiteQueens, types.Queen|types.ColorWhite)
+	p.EvalScore += evalPieceBits(p.WhiteKing, types.King|types.ColorWhite)
+	p.EvalScore += evalPieceBits(p.BlackPawns, types.Pawn|types.ColorBlack)
+	p.EvalScore += evalPieceBits(p.BlackKnights, types.Knight|types.ColorBlack)
+	p.EvalScore += evalPieceBits(p.BlackBishops, types.Bishop|types.ColorBlack)
+	p.EvalScore += evalPieceBits(p.BlackRooks, types.Rook|types.ColorBlack)
+	p.EvalScore += evalPieceBits(p.BlackQueens, types.Queen|types.ColorBlack)
+	p.EvalScore += evalPieceBits(p.BlackKing, types.King|types.ColorBlack)
+}
+
+func evalPieceBits(bb Bitboard, piece types.Piece) int {
+	score := 0
+	for bb != 0 {
+		sq := bitscan(bb)
+		bb &= bb - 1
+		score += signedPieceValue(piece, sq)
+	}
+	return score
+}
