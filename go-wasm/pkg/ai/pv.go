@@ -69,8 +69,8 @@ func reconstructMove(p *engine.Position, raw types.Move) types.Move {
 	flag := types.FlagNormal
 
 	pieceType := piece & types.TypeMask
-	fromRow, fromCol := raw.From/8, raw.From%8
-	toRow, toCol := raw.To/8, raw.To%8
+	fromRow, fromCol := int(raw.From)/8, int(raw.From)%8
+	toRow, toCol := int(raw.To)/8, int(raw.To)%8
 
 	switch pieceType {
 	case types.King:
@@ -88,11 +88,11 @@ func reconstructMove(p *engine.Position, raw types.Move) types.Move {
 			flag = types.FlagDoublePush
 		} else if fromCol != toCol && captured == 0 {
 			flag = types.FlagEnPassant
-			if p.EnPassantCapture >= 0 && raw.To == p.EnPassantTarget {
+			if p.EnPassantCapture >= 0 && int(raw.To) == p.EnPassantTarget {
 				if piece.IsWhite() {
-					captured = p.Board[raw.To+8]
+					captured = p.Board[int(raw.To)+8]
 				} else {
-					captured = p.Board[raw.To-8]
+					captured = p.Board[int(raw.To)-8]
 				}
 			}
 		}

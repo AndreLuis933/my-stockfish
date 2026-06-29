@@ -28,7 +28,7 @@ func (p *Position) MoveKing(piece types.Piece, i int, ml *MoveList) {
 		to := bitscan(targets)
 		targets &= targets - 1
 
-		move := types.Move{From: i, To: to, Flag: types.FlagNormal}
+		move := types.Move{From: uint8(i), To: uint8(to), Flag: types.FlagNormal}
 		if captured := p.Board[to]; captured != 0 {
 			move.Captured = captured
 		}

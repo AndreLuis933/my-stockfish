@@ -37,6 +37,11 @@ type Position struct {
 	WhitePieces, BlackPieces, Occupied, Empty Bitboard
 	dummyBB Bitboard // safety fallback for pieceBitboardFor(0) — never written to intentionally
 
+	// pieceBBTable maps a Piece byte to the address of its bitboard. It is
+	// rebuilt after reset() so Make/Unmake can resolve bitboards with a single
+	// array lookup instead of a switch.
+	pieceBBTable [256]*Bitboard
+
 	// undoStack is a fixed-size stack of undo info, enabling O(1) Make/Unmake
 	// with zero heap allocation. 256 is well beyond any realistic search depth.
 	undoStack [maxPly]undoInfo
@@ -144,41 +149,32 @@ func (p *Position) colorOccupancy(piece types.Piece) *Bitboard {
 // the given piece (type + color). Used by updateBitboards and Make/Unmake
 // to avoid a 12-way switch at each call site. Returns a dummy bitboard for
 // empty pieces (piece=0) so callers can safely dereference without nil checks.
+//
+// Internally this is resolved through a 256-entry lookup table; the method
+// remains so callers don't need to know the table exists.
 func (p *Position) pieceBitboardFor(piece types.Piece) *Bitboard {
-	pt := piece & types.TypeMask
-	switch piece & types.ColorMask {
-	case types.ColorWhite:
-		switch pt {
-		case types.Pawn:
-			return &p.WhitePawns
-		case types.Knight:
-			return &p.WhiteKnights
-		case types.Bishop:
-			return &p.WhiteBishops
-		case types.Rook:
-			return &p.WhiteRooks
-		case types.Queen:
-			return &p.WhiteQueens
-		case types.King:
-			return &p.WhiteKing
-		}
-	case types.ColorBlack:
-		switch pt {
-		case types.Pawn:
-			return &p.BlackPawns
-		case types.Knight:
-			return &p.BlackKnights
-		case types.Bishop:
-			return &p.BlackBishops
-		case types.Rook:
-			return &p.BlackRooks
-		case types.Queen:
-			return &p.BlackQueens
-		case types.King:
-			return &p.BlackKing
-		}
+	return p.pieceBBTable[piece]
+}
+
+// buildPieceBBTable fills the per-position lookup table that maps a Piece byte
+// directly to the address of its bitboard. This removes a switch from every
+// Make/Unmake call and lets the compiler inline the lookup.
+func (p *Position) buildPieceBBTable() {
+	for i := range p.pieceBBTable {
+		p.pieceBBTable[i] = &p.dummyBB
 	}
-	return &p.dummyBB
+	p.pieceBBTable[types.ColorWhite|types.Pawn] = &p.WhitePawns
+	p.pieceBBTable[types.ColorWhite|types.Knight] = &p.WhiteKnights
+	p.pieceBBTable[types.ColorWhite|types.Bishop] = &p.WhiteBishops
+	p.pieceBBTable[types.ColorWhite|types.Rook] = &p.WhiteRooks
+	p.pieceBBTable[types.ColorWhite|types.Queen] = &p.WhiteQueens
+	p.pieceBBTable[types.ColorWhite|types.King] = &p.WhiteKing
+	p.pieceBBTable[types.ColorBlack|types.Pawn] = &p.BlackPawns
+	p.pieceBBTable[types.ColorBlack|types.Knight] = &p.BlackKnights
+	p.pieceBBTable[types.ColorBlack|types.Bishop] = &p.BlackBishops
+	p.pieceBBTable[types.ColorBlack|types.Rook] = &p.BlackRooks
+	p.pieceBBTable[types.ColorBlack|types.Queen] = &p.BlackQueens
+	p.pieceBBTable[types.ColorBlack|types.King] = &p.BlackKing
 }
 
 // TrimUndoStack keeps only the last n entries of the undo stack and resets
@@ -212,4 +208,6 @@ func (p *Position) reset() {
 	p.WhitePawns, p.WhiteKnights, p.WhiteBishops, p.WhiteRooks, p.WhiteQueens, p.WhiteKing = 0, 0, 0, 0, 0, 0
 	p.BlackPawns, p.BlackKnights, p.BlackBishops, p.BlackRooks, p.BlackQueens, p.BlackKing = 0, 0, 0, 0, 0, 0
 	p.WhitePieces, p.BlackPieces, p.Occupied, p.Empty = 0, 0, 0, 0
+
+	p.buildPieceBBTable()
 }

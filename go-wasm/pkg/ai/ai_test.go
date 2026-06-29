@@ -172,7 +172,7 @@ func findMove(t *testing.T, src, dst string) types.Move {
 	engine.Game.LegalMoves(&ml)
 	for i := 0; i < ml.Len(); i++ {
 		m := ml.Get(i)
-		if m.From == from && m.To == to {
+		if int(m.From) == from && int(m.To) == to {
 			return m
 		}
 	}

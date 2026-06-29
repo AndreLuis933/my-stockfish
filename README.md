@@ -35,8 +35,8 @@ Each subproject has its own README with detailed architecture and instructions:
 | Routing | react-router-dom v7 |
 | Package manager | Bun (frontend) / Go modules (engine) |
 | Checkers AI | TypeScript — Minimax + Alpha-Beta + IDDFS (depth 8) |
-| Chess engine | Go 1.25 → WebAssembly (board state, move gen, castling, check/checkmate) |
-| Chess AI | Go 1.25 → WebAssembly — negamax + alpha-beta + iterative deepening + transposition table + quiescence search (incremental material + piece-square table eval) |
+| Chess engine | Go 1.25 → WebAssembly — hybrid bitboard board state (magic bitboards for sliders), move gen, castling, check/checkmate |
+| Chess AI | Go 1.25 → WebAssembly — negamax + alpha-beta + iterative deepening + transposition table + quiescence + killers/history + null-move + LMR + aspiration (incremental material + piece-square table eval) |
 
 ---
 
@@ -92,8 +92,9 @@ go run ./cmd/command
 
 - Game runs in the browser via Go WASM: **human-vs-human**, **human-vs-AI** (AI plays either color), and **AI-vs-AI** (both sides played by the engine)
 - **Standalone UCI engine** (`cmd/uci`): supports cutechess-cli for automated testing; persistent TT (cleared on `ucinewgame`), panic recovery, fallback legal move, `go depth`/`go wtime`/`go movetime`/`go infinite`, `stop`, `quit`, `position startpos|fen moves ...`
-- **Chess AI** (`pkg/ai`): negamax + alpha-beta + iterative deepening + **transposition table** + **quiescence search** + **killer moves + history heuristic** + **null-move pruning** + **late move reductions (LMR)** + **aspiration windows** in Go; material + piece-square table evaluation (incremental, O(1)); MVV + killers + history move ordering; time-limited or fixed-depth search; ~7M nodes/sec native
+- **Chess AI** (`pkg/ai`): negamax + alpha-beta + iterative deepening + **transposition table** + **quiescence search** + **killer moves + history heuristic** + **null-move pruning** + **late move reductions (LMR)** + **aspiration windows** in Go; material + piece-square table evaluation (incremental, O(1)); MVV + killers + history move ordering (each move scored once into a reusable buffer); time-limited or fixed-depth search; **~5.5M nodes/sec native, depth 13 at 1s** on the starting position (depth 15 at 5s)
 - Go engine handles: board representation, FEN loading (all 6 fields), move generation for all piece types, captures, en passant, pawn promotion, **castling**, **SAN generation + parsing**, **PGN replay** (single round-trip)
+- **Hybrid bitboards**: 12 `uint64` piece bitboards + 4 occupancy bitboards maintained alongside the `[64]Piece` mailbox; move generation uses **magic bitboards** for sliders (bishop/rook/queen), precomputed attack tables for knights/kings, and shift-based generation for pawns; `Make`/`Unmake` update bitboards incrementally with inline XOR deltas. The mailbox is kept for O(1) piece-on-square lookups (SAN, captures, eval)
 - **Position struct**: all game state in `Position` (Board, WhiteToMove, CastlingRights, EnPassant*, HalfmoveClock, FullmoveNumber, Hash, KingSquares, EvalScore, undoStack[maxPly], undoPly); a global `Game *Position` is used by the WASM bridge; the AI uses the same Position via `Make`/`Unmake`
 - **Frontend split**: `Chess.tsx` composes sub-components from `components/chess/` (`SanText`, `ModeSelector`, `AiSetupPanel`, `TurnBanner`, `ClockConfigPanel`, `ActionBar`, `AnalysisSummary`, `PgnImportModal`); `Chess.hooks.ts` delegates to `useMultiPv` (continuous multi-PV analysis) and `useChessAnalysis` (single-position analysis + auto-analyze); shared chess sub-component styles live in `ChessShared.module.css`
 - **Zobrist hashing**: `[12][64]uint64` piece keys + side + castling + EP keys (fixed seed); `Hash` maintained incrementally in `Make`/`Unmake` via XOR; `ComputeHash()` for initial computation in `LoadFen`
@@ -103,7 +104,7 @@ go run ./cmd/command
 - **Fixed undo stack**: `undoStack [maxPly]undoInfo` (256 entries, ~12KB) + `undoPly int`; zero heap allocation in search; `Ply()` method exposes ply for TT mate-score adjustment
 - **Quiescence search**: `quiescence()` — stand-pat + captures-only extension past depth 0; prevents horizon effect (AI no longer thinks a hanging queen is safe); uses `PseudoLegalCaptures()` (capture-only move gen); repetition + 50-move draw checks
 - **Draw rules**: `CurrentStatus()` checks `IsDraw()` (50-move rule, threefold repetition, insufficient material); `negamax` checks `IsRepetition()` + `HalfmoveClock >= 100` at every node; `IsInsufficientMaterial()` (zero-alloc: K vs K, K+B vs K, K+N vs K, K+B vs K+B same color) checked in `CurrentStatus` only (too expensive per-node in search)
-- **MoveList**: fixed `[256]Move` inline array + count, passed as `*MoveList` — stack-allocated, zero heap allocation in hot paths (perft, legal moves, AI search, quiescence)
+- **MoveList**: fixed `[256]Move` inline array + count, passed as `*MoveList` — stack-allocated, zero heap allocation in hot paths (perft, legal moves, AI search, quiescence); `Move.From`/`Move.To` are `uint8` so the struct is 5 bytes (was 24) and the list is 1.3KB (was 6KB)
 - **Make/Unmake**: O(1) incremental make/unmake with undo stack — the performance foundation for AI search
 - **Castling**: data-driven via `castleSides [4]castleSide` table; all 6 FIDE conditions checked; rook moves with the king; castling rights cleared on king/rook moves and rook captures
 - **Piece.IsEnemy()**: unified enemy detection in all move generators — correctly rejects empty squares, replaces duplicated color-branch logic
@@ -125,7 +126,7 @@ go run ./cmd/command
 ### What is missing
 
 - **Opening book**: no opening repertoire — AI plays from first principles every game
-- **Bitboards**: board is `[64]Piece` mailbox — bitboards + magic bitboards would give 10-50× raw speed; full engine rewrite
+- **Lazy move selection**: `orderMoves` fully sorts the move list up front (~30% of search time); picking the best remaining move on demand would skip ordering moves never searched after a cutoff
 - **Parallel search**: no goroutine-based parallel search yet — needs thread-safe TT
 - **Type generator auto-run**: the Vite plugin does not run the type generator; `wasm-contract.ts` is hand-maintained
 - **PV-SAN in TS**: `chessNotation.ts` still has `toSan`, `canPieceReach`, `isPathClear` (used by `pvToSan.ts` for multi-PV line notation); will move to Go

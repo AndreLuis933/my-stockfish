@@ -37,13 +37,13 @@ func (p *Position) MovePawn(piece types.Piece, i int, ml *MoveList) {
 			if toRow == promotionRow {
 				promotionPawn(i, to, myColor, 0, ml)
 			} else {
-				ml.Add(types.Move{From: i, To: to})
+				ml.Add(types.Move{From: uint8(i), To: uint8(to)})
 			}
 			// Double push from rank 2 (row 1).
 			if row == 1 {
 				double := (single << 8) & empty
 				if double != 0 {
-					ml.Add(types.Move{From: i, To: bitscan(double), Flag: types.FlagDoublePush})
+					ml.Add(types.Move{From: uint8(i), To: uint8(bitscan(double)), Flag: types.FlagDoublePush})
 				}
 			}
 		}
@@ -58,7 +58,7 @@ func (p *Position) MovePawn(piece types.Piece, i int, ml *MoveList) {
 			if toRow == promotionRow {
 				promotionPawn(i, to, myColor, p.Board[to], ml)
 			} else {
-				ml.Add(types.Move{From: i, To: to, Flag: types.FlagNormal, Captured: p.Board[to]})
+				ml.Add(types.Move{From: uint8(i), To: uint8(to), Flag: types.FlagNormal, Captured: p.Board[to]})
 			}
 		}
 
@@ -66,7 +66,7 @@ func (p *Position) MovePawn(piece types.Piece, i int, ml *MoveList) {
 		if p.EnPassantTarget != -1 {
 			epBB := ((pawnBB & notA) << 7) | ((pawnBB & notH) << 9)
 			if epBB&(1<<p.EnPassantTarget) != 0 {
-				ml.Add(types.Move{From: i, To: p.EnPassantTarget, Flag: types.FlagEnPassant, Captured: p.Board[p.EnPassantCapture]})
+				ml.Add(types.Move{From: uint8(i), To: uint8(p.EnPassantTarget), Flag: types.FlagEnPassant, Captured: p.Board[p.EnPassantCapture]})
 			}
 		}
 	} else {
@@ -78,13 +78,13 @@ func (p *Position) MovePawn(piece types.Piece, i int, ml *MoveList) {
 			if toRow == promotionRow {
 				promotionPawn(i, to, myColor, 0, ml)
 			} else {
-				ml.Add(types.Move{From: i, To: to})
+				ml.Add(types.Move{From: uint8(i), To: uint8(to)})
 			}
 			// Double push from rank 7 (row 6).
 			if row == 6 {
 				double := (single >> 8) & empty
 				if double != 0 {
-					ml.Add(types.Move{From: i, To: bitscan(double), Flag: types.FlagDoublePush})
+					ml.Add(types.Move{From: uint8(i), To: uint8(bitscan(double)), Flag: types.FlagDoublePush})
 				}
 			}
 		}
@@ -99,7 +99,7 @@ func (p *Position) MovePawn(piece types.Piece, i int, ml *MoveList) {
 			if toRow == promotionRow {
 				promotionPawn(i, to, myColor, p.Board[to], ml)
 			} else {
-				ml.Add(types.Move{From: i, To: to, Flag: types.FlagNormal, Captured: p.Board[to]})
+				ml.Add(types.Move{From: uint8(i), To: uint8(to), Flag: types.FlagNormal, Captured: p.Board[to]})
 			}
 		}
 
@@ -107,7 +107,7 @@ func (p *Position) MovePawn(piece types.Piece, i int, ml *MoveList) {
 		if p.EnPassantTarget != -1 {
 			epBB := ((pawnBB & notH) >> 7) | ((pawnBB & notA) >> 9)
 			if epBB&(1<<p.EnPassantTarget) != 0 {
-				ml.Add(types.Move{From: i, To: p.EnPassantTarget, Flag: types.FlagEnPassant, Captured: p.Board[p.EnPassantCapture]})
+				ml.Add(types.Move{From: uint8(i), To: uint8(p.EnPassantTarget), Flag: types.FlagEnPassant, Captured: p.Board[p.EnPassantCapture]})
 			}
 		}
 	}
@@ -120,8 +120,8 @@ func (p *Position) MovePawn(piece types.Piece, i int, ml *MoveList) {
 func promotionPawn(from, to int, color, captured types.Piece, ml *MoveList) {
 	for _, promotion := range []types.Piece{types.Queen, types.Knight, types.Bishop, types.Rook} {
 		ml.Add(types.Move{
-			From:      from,
-			To:        to,
+			From:      uint8(from),
+			To:        uint8(to),
 			Promotion: promotion | color,
 			Flag:      types.FlagPromotion,
 			Captured:  captured,

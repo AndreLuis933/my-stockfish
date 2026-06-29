@@ -53,7 +53,7 @@ type historyTable [64 * 64]int
 
 // scoreHistory returns the history score for a quiet move.
 func (h *historyTable) score(m types.Move) int {
-	return h[m.From*64+m.To]
+	return h[int(m.From)*64+int(m.To)]
 }
 
 // storeHistory increments the history score for a quiet cutoff move. The
@@ -63,7 +63,7 @@ func (h *historyTable) store(m types.Move, depth int) {
 	if depth < 0 {
 		depth = 0
 	}
-	h[m.From*64+m.To] += depth * depth
+	h[int(m.From)*64+int(m.To)] += depth * depth
 }
 
 // ageHistory decays history scores between iterations by subtracting a
@@ -112,24 +112,30 @@ func moveOrderScore(m types.Move, previousBest *types.Move, killers *killerTable
 // The previousBest move (from iterative deepening / TT) is forced to index 0
 // by giving it the highest score — one sort pass, no second scan.
 //
+// Each move is scored exactly once into a parallel array, then sorted by the
+// cached scores. Scoring once (not on every comparison) keeps the expensive
+// moveOrderScore — killer/history lookups — out of the O(n²) comparison loop.
+//
 // Uses insertion sort: optimal for the small move lists (~20-40 moves) typical
 // in chess. stdlib sort.Slice's introsort + closure overhead is slower here.
-func orderMoves(ml *engine.MoveList, previousBest *types.Move, killers *killerTable, history *historyTable, ply int) {
+func orderMoves(ml *engine.MoveList, previousBest *types.Move, killers *killerTable, history *historyTable, ply int, scores *[256]int) {
 	n := ml.Len()
 	if n <= 1 {
 		return
 	}
 	moves := ml.Slice()
 
+	for i := range n {
+		scores[i] = moveOrderScore(moves[i], previousBest, killers, history, ply)
+	}
+
 	for i := 1; i < n; i++ {
-		si := moveOrderScore(moves[i], previousBest, killers, history, ply)
-		for j := i; j > 0; j-- {
-			sj := moveOrderScore(moves[j-1], previousBest, killers, history, ply)
-			if si <= sj {
-				break
-			}
-			moves[j], moves[j-1] = moves[j-1], moves[j]
+		si, mi := scores[i], moves[i]
+		j := i
+		for ; j > 0 && scores[j-1] < si; j-- {
+			scores[j], moves[j] = scores[j-1], moves[j-1]
 		}
+		scores[j], moves[j] = si, mi
 	}
 }
 

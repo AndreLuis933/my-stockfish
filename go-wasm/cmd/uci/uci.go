@@ -33,7 +33,7 @@ func uciToSquare(s string) int {
 // moveToUCI serializes an engine Move to UCI format: from+to plus an
 // optional promotion letter (q/r/b/n). Example: "e2e4", "e7e8q".
 func moveToUCI(m types.Move) string {
-	s := squareToUCI(m.From) + squareToUCI(m.To)
+	s := squareToUCI(int(m.From)) + squareToUCI(int(m.To))
 	if m.Promotion != 0 {
 		switch m.Promotion & types.TypeMask {
 		case types.Queen:
@@ -71,7 +71,7 @@ func (s *uciSession) parseUCIMove(uci string) (types.Move, bool) {
 	s.pos.LegalMoves(&legal)
 	for i := 0; i < legal.Len(); i++ {
 		m := legal.Get(i)
-		if m.From != from || m.To != to {
+		if int(m.From) != from || int(m.To) != to {
 			continue
 		}
 		if promoLetter == 0 {

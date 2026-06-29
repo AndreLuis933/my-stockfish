@@ -96,6 +96,7 @@ func TestBitboardMailboxConsistency(t *testing.T) {
 func TestPieceBitboardFor(t *testing.T) {
 	// Verify the helper returns the right pointer for each piece type/color.
 	p := &Position{}
+	p.buildPieceBBTable()
 	tests := []struct {
 		piece types.Piece
 		want  *Bitboard

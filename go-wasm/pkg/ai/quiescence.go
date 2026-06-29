@@ -60,7 +60,7 @@ func quiescence(p *engine.Position, alpha, beta int, ctx *searchCtx) int {
 
 	var ml engine.MoveList
 	p.PseudoLegalCaptures(&ml)
-	orderMoves(&ml, nil, nil, nil, 0)
+	orderMoves(&ml, nil, nil, nil, 0, &ctx.orderScratch)
 
 	moverColor := sideColor(p)
 

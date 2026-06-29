@@ -79,7 +79,7 @@ func TestLegalMovesKingInCheckFromRook(t *testing.T) {
 
 	movesToTarget := map[int]bool{}
 	for _, m := range moves {
-		movesToTarget[m.To] = true
+		movesToTarget[int(m.To)] = true
 	}
 
 	rookIdx := 12 // e2
@@ -89,7 +89,7 @@ func TestLegalMovesKingInCheckFromRook(t *testing.T) {
 
 	kingIdx := 4 // e1
 	for _, m := range moves {
-		if m.From != kingIdx {
+		if int(m.From) != kingIdx {
 			t.Errorf("when in check, only the king can move (or capture the checker); found move from %d", m.From)
 		}
 	}
@@ -103,7 +103,7 @@ func TestLegalMovesPinnedPiece(t *testing.T) {
 
 	bishopIdx := 12 // e2
 	for _, m := range moves {
-		if m.From == bishopIdx {
+		if int(m.From) == bishopIdx {
 			t.Errorf("pinned bishop should not be allowed to move off the pin line")
 		}
 	}
@@ -119,8 +119,8 @@ func TestLegalMovesKingCannotMoveIntoCheck(t *testing.T) {
 
 	kingMoveTargets := map[int]bool{}
 	for _, m := range moves {
-		if m.From == kingIdx {
-			kingMoveTargets[m.To] = true
+		if int(m.From) == kingIdx {
+			kingMoveTargets[int(m.To)] = true
 		}
 	}
 

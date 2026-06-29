@@ -19,7 +19,6 @@ func (p *Position) Perft(depth int) int {
 	p.PseudoLegalMoves(&ml)
 	moverColor := p.colorOfSide()
 	nodes := 0
-
 	for i := 0; i < ml.n; i++ {
 		m := ml.moves[i]
 		p.Make(m)

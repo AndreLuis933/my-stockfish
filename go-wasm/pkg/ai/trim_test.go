@@ -230,7 +230,7 @@ func TestLongGameNoOverflow(t *testing.T) {
 			break
 		}
 		move := ml.Get(0)
-		engine.MakeMove(move.From, move.To, int(move.Promotion))
+		engine.MakeMove(int(move.From), int(move.To), int(move.Promotion))
 
 		// undoPly must stay bounded by the trim in MakeMove. With maxPly=512
 		// and a 100-margin trim, undoPly should never exceed ~101 after a trim

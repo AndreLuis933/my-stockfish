@@ -27,7 +27,7 @@ func TestThreefoldRepetition(t *testing.T) {
 		p.LegalMoves(&ml)
 		for j := 0; j < ml.Len(); j++ {
 			m := ml.Get(j)
-			if m.From == mv[0] && m.To == mv[1] {
+			if int(m.From) == mv[0] && int(m.To) == mv[1] {
 				p.Make(m)
 				break
 			}

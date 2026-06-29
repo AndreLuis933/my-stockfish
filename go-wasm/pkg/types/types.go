@@ -57,8 +57,8 @@ const (
 )
 
 type Move struct {
-	From      int    `json:"from"`
-	To        int    `json:"to"`
+	From      uint8  `json:"from"`
+	To        uint8  `json:"to"`
 	Promotion Piece  `json:"promotion,omitempty"`
 	// Internal-only fields — NOT serialized to JSON (the frontend contract
 	// is {from, to, promotion?}). Used by Make/Unmake and AI move ordering.

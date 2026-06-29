@@ -109,8 +109,8 @@ func analysisToJSON(result ai.SearchResult) interface{} {
 		Nodes     int    `json:"nodes"`
 		TimeMs    int64  `json:"timeMs"`
 	}{
-		From:   result.Move.From,
-		To:     result.Move.To,
+		From:   int(result.Move.From),
+		To:     int(result.Move.To),
 		Score:  result.Score,
 		Depth:  result.Depth,
 		Nodes:  result.Nodes,
@@ -162,7 +162,7 @@ func aiMultiPvJS(_ js.Value, args []js.Value) interface{} {
 	for _, line := range lines {
 		moves := make([]pvMoveJSON, 0, len(line.Moves))
 		for _, m := range line.Moves {
-			mv := pvMoveJSON{From: m.From, To: m.To}
+			mv := pvMoveJSON{From: int(m.From), To: int(m.To)}
 			if m.Promotion != 0 {
 				promo := int(m.Promotion)
 				mv.Promotion = &promo
@@ -202,7 +202,7 @@ func sanJS(_ js.Value, args []js.Value) interface{} {
 	}
 
 	piece := engine.Game.Board[from]
-	move := types.Move{From: from, To: to}
+	move := types.Move{From: uint8(from), To: uint8(to)}
 
 	// Infer the flag (same logic as MakeMove)
 	switch {
@@ -277,8 +277,8 @@ func applyPgnJS(_ js.Value, args []js.Value) interface{} {
 
 		entry := histEntry{
 			San:         san,
-			From:        move.From,
-			To:          move.To,
+			From:        int(move.From),
+			To:          int(move.To),
 			BoardBefore: boardBefore,
 			BoardAfter:  boardAfter,
 			CheckSquare: checkSq,
@@ -346,8 +346,8 @@ func moveToJSON(move types.Move) interface{} {
 		To        int    `json:"to"`
 		Promotion *int   `json:"promotion,omitempty"`
 	}{
-		From: move.From,
-		To:   move.To,
+		From: int(move.From),
+		To:   int(move.To),
 	}
 	if move.Promotion != 0 {
 		promo := int(move.Promotion)

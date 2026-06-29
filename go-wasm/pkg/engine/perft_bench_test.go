@@ -6,7 +6,18 @@ import (
 	"time"
 )
 
-// TestPerftSpeed measures raw perft performance (move gen + make/unmake).
+func runPerftBench(t *testing.T, name, fen string, depth int, fn func(int) int) {
+	t.Helper()
+	LoadFen(fen)
+	start := time.Now()
+	nodes := fn(depth)
+	elapsed := time.Since(start)
+	nps := int64(nodes) * int64(time.Second) / int64(elapsed)
+	fmt.Printf("%-35s: %d nodes in %v (%d Mnps)\n", name, nodes, elapsed, nps/1_000_000)
+	t.Logf("%-35s: %d nodes in %v (%d Mnps)", name, nodes, elapsed, nps/1_000_000)
+}
+
+// TestPerftSpeed compares the reference Perft against the lightweight PerftFast.
 func TestPerftSpeed(t *testing.T) {
 	fens := []struct {
 		fen   string
@@ -19,12 +30,10 @@ func TestPerftSpeed(t *testing.T) {
 	}
 
 	for _, tc := range fens {
-		LoadFen(tc.fen)
-		start := time.Now()
-		nodes := Game.Perft(tc.depth)
-		elapsed := time.Since(start)
-		nps := int64(nodes) * int64(time.Second) / int64(elapsed)
-		fmt.Printf("%-25s: %d nodes in %v (%d Mnps)\n", tc.name, nodes, elapsed, nps/1_000_000)
-		t.Logf("%-25s: %d nodes in %v (%d Mnps)", tc.name, nodes, elapsed, nps/1_000_000)
+		Game.reset()
+		runPerftBench(t, tc.name+" (Perft)", tc.fen, tc.depth, Game.Perft)
+
+		Game.reset()
+		runPerftBench(t, tc.name+" (PerftFast)", tc.fen, tc.depth, Game.PerftFast)
 	}
 }

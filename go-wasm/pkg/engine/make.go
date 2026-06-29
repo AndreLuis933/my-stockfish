@@ -24,7 +24,7 @@ func MakeMove(from, to, promotion int) {
 	}
 
 	piece := Game.Board[from]
-	move := types.Move{From: from, To: to}
+	move := types.Move{From: uint8(from), To: uint8(to)}
 
 	// Infer the flag from the board (the bridge doesn't know move flags).
 	// This path is only used by the frontend; the engine and AI always use
@@ -33,6 +33,9 @@ func MakeMove(from, to, promotion int) {
 	case piece&types.Pawn != 0 && promotion != 0:
 		move.Flag = types.FlagPromotion
 		move.Promotion = types.Piece(promotion)
+		if Game.Board[to] != 0 {
+			move.Captured = Game.Board[to]
+		}
 	case piece&types.King != 0 && abs(to-from) == 2:
 		if to > from {
 			move.Flag = types.FlagCastleK
@@ -66,7 +69,7 @@ func MakeMove(from, to, promotion int) {
 // Castling rights are updated when the king or a rook moves, or a rook is
 // captured on its origin corner. The side to move is flipped at the end.
 func (p *Position) Make(move types.Move) {
-	from, to := move.From, move.To
+	from, to := int(move.From), int(move.To)
 	piece := p.Board[from]
 
 	// Record where the captured piece actually sits. For all captures except
@@ -342,7 +345,7 @@ func (p *Position) Make(move types.Move) {
 // promotions, the pawn is recovered by stripping the promoted type bits and
 // keeping the pawn type + color).
 func (p *Position) Unmake(move types.Move) {
-	from, to := move.From, move.To
+	from, to := int(move.From), int(move.To)
 
 	// Flip side to move first — we're now undoing the move of the side that
 	// just moved, so the side to move goes back to them.

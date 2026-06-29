@@ -62,6 +62,6 @@ func (p *Position) generateCastling(piece types.Piece, ml *MoveList) {
 		if p.isPathAttacked(s.kingPath, enemy) { // king path (traverse + destination) not attacked
 			continue
 		}
-		ml.Add(types.Move{From: s.kingFrom, To: s.kingTo, Flag: s.flag})
+		ml.Add(types.Move{From: uint8(s.kingFrom), To: uint8(s.kingTo), Flag: s.flag})
 	}
 }

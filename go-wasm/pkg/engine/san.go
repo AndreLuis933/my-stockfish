@@ -60,7 +60,7 @@ func (p *Position) ToSan(m types.Move) (string, error) {
 	pieceType := piece & types.TypeMask
 
 	// Castling
-	if pieceType == types.King && abs(m.To-m.From) == 2 {
+	if pieceType == types.King && abs(int(m.To)-int(m.From)) == 2 {
 		base := "O-O"
 		if m.To < m.From {
 			base = "O-O-O"
@@ -77,7 +77,7 @@ func (p *Position) ToSan(m types.Move) (string, error) {
 			sb.WriteByte(byte('a' + (m.From % 8)))
 			sb.WriteByte('x')
 		}
-		sb.WriteString(sanSquare(m.To))
+		sb.WriteString(sanSquare(int(m.To)))
 		if m.Promotion != 0 {
 			promoType := m.Promotion & types.TypeMask
 			if letter, ok := promotionLetters[promoType]; ok {
@@ -98,7 +98,7 @@ func (p *Position) ToSan(m types.Move) (string, error) {
 		if isCapture {
 			sb.WriteByte('x')
 		}
-		sb.WriteString(sanSquare(m.To))
+		sb.WriteString(sanSquare(int(m.To)))
 	}
 
 	return p.appendCheckSuffix(sb.String(), m), nil
@@ -128,15 +128,15 @@ func (p *Position) disambiguation(m types.Move, pieceType types.Piece) string {
 		inCheck := p.IsInCheck(color)
 		p.Unmake(mv)
 		if !inCheck {
-			candidates = append(candidates, mv.From)
+			candidates = append(candidates, int(mv.From))
 		}
 	}
 	if len(candidates) == 0 {
 		return ""
 	}
 
-	fromFile := m.From % 8
-	fromRank := m.From / 8
+	fromFile := int(m.From) % 8
+	fromRank := int(m.From) / 8
 
 	sameFile := false
 	sameRank := false
@@ -155,7 +155,7 @@ func (p *Position) disambiguation(m types.Move, pieceType types.Piece) string {
 	if !sameRank {
 		return string(byte('1' + fromRank))
 	}
-	return sanSquare(m.From)
+	return sanSquare(int(m.From))
 }
 
 // appendCheckSuffix makes the move on the position, checks if it gives

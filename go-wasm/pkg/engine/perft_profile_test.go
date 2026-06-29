@@ -6,23 +6,34 @@ import (
 	"webassemble/pkg/types"
 )
 
-// BenchmarkPerftBulk counts perft nodes per second using the bulk-counting
-// method (no move list at the leaf — just count legal moves).
-func BenchmarkPerftBulkDepth4(b *testing.B) {
+func benchmarkPerft(b *testing.B, depth int, fn func(int) int) {
 	LoadFen(StartingFEN)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		Game.Perft(4)
+		fn(depth)
 	}
+}
+
+// BenchmarkPerftBulkDepth4 counts perft nodes per second using the bulk-counting
+// method (no move list at the leaf — just count legal moves).
+func BenchmarkPerftBulkDepth4(b *testing.B) {
+	benchmarkPerft(b, 4, Game.Perft)
+}
+
+// BenchmarkPerftFastDepth4 counts perft nodes per second using the lightweight
+// make/unmake path.
+func BenchmarkPerftFastDepth4(b *testing.B) {
+	benchmarkPerft(b, 4, Game.PerftFast)
 }
 
 // BenchmarkPerftBulkDepth5 measures deeper perft.
 func BenchmarkPerftBulkDepth5(b *testing.B) {
-	LoadFen(StartingFEN)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		Game.Perft(5)
-	}
+	benchmarkPerft(b, 5, Game.Perft)
+}
+
+// BenchmarkPerftFastDepth5 measures deeper perft with the fast path.
+func BenchmarkPerftFastDepth5(b *testing.B) {
+	benchmarkPerft(b, 5, Game.PerftFast)
 }
 
 // BenchmarkPseudoLegalCaptures benchmarks quiescence capture gen.

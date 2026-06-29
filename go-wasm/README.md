@@ -10,21 +10,21 @@ Go 1.25 chess engine and AI compiled to WebAssembly. Powers the Xadrez (Chess) g
 
 The engine handles all chess logic for the browser app:
 
-- **Board representation**: `[64]Piece` array (mailbox indexing, a1=0, h8=63)
-- **FEN loading**: piece placement, side to move, castling rights (`KQkq`), en passant target, halfmove clock, fullmove number; computes initial Zobrist hash + incremental eval score
-- **Move generation**: all piece types — pawn (forward, double, captures, en passant, promotion), knight, bishop, rook, queen, king (one-step + castling)
-- **Capture-only move generation**: `PseudoLegalCaptures()` — captures + en passant + promotions only, used by quiescence search
-- **MoveList**: fixed `[256]Move` inline array + count, passed as `*MoveList` to move generators — stack-allocated, zero heap allocation in hot paths
+- **Board representation**: hybrid — 12 `uint64` piece bitboards + 4 occupancy bitboards (`WhitePieces`, `BlackPieces`, `Occupied`, `Empty`) maintained alongside a `[64]Piece` mailbox (LERF indexing, a1=0, h8=63). The bitboards drive move generation and attack detection; the mailbox answers "what piece is on square X" in O(1) for SAN, captures, and eval
+- **Magic bitboards** (`magic.go`, `magic_data.go`): sliding-piece attacks (bishop/rook/queen) via per-square magic multipliers that hash the relevant occupancy into a collision-free lookup table — `bishopAttacksBB(sq, occ)` / `rookAttacksBB(sq, occ)` are a multiply + shift + array read
+- **FEN loading**: piece placement, side to move, castling rights (`KQkq`), en passant target, halfmove clock, fullmove number; computes initial Zobrist hash + incremental eval score; rebuilds the bitboards from the mailbox
+- **Move generation**: all piece types using bitboards — pawns via shifts (forward, double, captures, en passant, promotion), knights/kings via precomputed attack tables, bishop/rook/queen via magic lookups; only iterates over squares that actually hold a piece (`bitscan` + clear-lowest-bit loop)
+- **Capture-only move generation**: `PseudoLegalCaptures()` — captures + en passant + promotions only (bitboard `& enemyPieces`), used by quiescence search
+- **MoveList**: fixed `[256]Move` inline array + count, passed as `*MoveList` to move generators — stack-allocated, zero heap allocation in hot paths. `Move.From`/`Move.To` are `uint8`, so the struct is 5 bytes (was 24) and the list is 1.3KB (was 6KB)
 - **Castling**: data-driven via `castleSides [4]castleSide` table; all 6 FIDE conditions checked as sequential guards with comments; rook moves with the king on `Make`; rights cleared on king/rook moves and rook captures
-- **Piece.IsEnemy()**: unified enemy detection (`other&ColorMask != ColorNone && p&ColorMask != other&ColorMask`) — replaces duplicated color-branch logic in all move generators; correctly rejects empty squares
-- **Make/Unmake**: `Position.Make(move)` applies a move incrementally (board, hash, eval, king squares, castling, EP, clocks, side) and pushes undo info; `Position.Unmake(move)` reverses it in O(1) — no full board copy, the performance foundation for AI search
+- **Make/Unmake**: `Position.Make(move)` applies a move incrementally — mailbox, **piece + occupancy bitboards (inline XOR deltas)**, hash, eval, king squares, castling, EP, clocks, side — and pushes undo info; `Position.Unmake(move)` reverses it in O(1) — no full board copy, the performance foundation for AI search
 - **Incremental evaluation**: `EvalScore` (white material+PST minus black) maintained in `Make`/`Unmake`; PST tables in `evaluate.go`
 - **Zobrist hashing**: `[12][64]uint64` piece keys + side + castling + EP keys (fixed seed); `Hash` maintained incrementally in `Make`/`Unmake` via XOR
 - **Transposition table**: 32MB default (2M entries × 16 bytes); `TTEntry{key, score int16, depth, flag, gen, move uint16}`; **gen-aware replacement** (gen+depth priority); `Probe`/`Store`/`Clear`/`FillPercent`; `PackMove`/`UnpackMove`
 - **King square cache**: `KingSquares[2]` in Position, updated in `Make`/`Unmake`; `FindKing` is O(1) array read
 - **Fixed undo stack**: `undoStack [maxPly]undoInfo` (256 entries) + `undoPly int`; zero heap allocation in search; `Ply()` method for TT mate-score adjustment
 - **Legal move filtering**: pseudo-legal moves filtered by Make/Unmake — pins, en-passant discovered checks, and king-moves-into-check handled automatically
-- **Check detection**: `IsSquareAttacked` (reverse-scan from a square) + `IsInCheck` (O(1) king lookup + attack scan) + `KingCheck()` (returns checked king's square index or -1)
+- **Check detection**: `attackersTo(sq, color)` returns a bitboard of all attackers of a square via parallel bitboard ops (one AND per piece type, OR'd); `IsSquareAttacked` / `IsInCheck` (O(1) king lookup + `attackersTo`) build on it; `KingCheck()` returns the checked king's square index or -1
 - **Game status**: `CurrentStatus()` returns `playing | white-wins | black-wins | draw` (checkmate = no legal moves + in check, stalemate = no legal moves + not in check, draw = 50-move / threefold repetition / insufficient material)
 - **Draw rules**: `IsRepetition()` (undo stack hash scan, bounded by halfmove clock), `IsFiftyMoveRule()`, `IsInsufficientMaterial()` (zero-alloc: K vs K, K+B vs K, K+N vs K, K+B vs K+B same color), `IsDraw()`
 - **Perft validation**: `Perft()` recursive move enumeration using Make/Unmake + stack-allocated MoveList; validated against all 6 standard positions from chessprogramming.org/Perft_Results
@@ -37,9 +37,10 @@ Separate package with clean one-directional dependency (`pkg/ai` → `pkg/engine
 
 - **Evaluation**: O(1) read of incremental `EvalScore` (material + piece-square tables maintained by `Make`/`Unmake`), negated for side to move
 - **Search**: negamax + alpha-beta pruning + iterative deepening (IDDFS)
+- **Pruning + reductions**: null-move pruning (R=2, guarded by `hasNonPawnMaterial` bitboard test + `!inCheck` + `ply > 0` + `depth > 3`), late move reductions (LMR), and aspiration windows from depth 3
 - **Transposition table**: Zobrist hash → 16-byte entry; **gen-aware replacement** (gen+depth priority); mate score ply adjustment; TT move for ordering
 - **Quiescence search**: stand-pat + captures-only (`PseudoLegalCaptures`) at depth 0 — prevents horizon effect
-- **Move ordering**: MVV (captures by `MaterialValue`) + previousBest/TT-move-to-front; insertion sort (optimal for ~20-40 moves)
+- **Move ordering**: previousBest/TT-move-to-front + MVV (captures by `MaterialValue`) + killers + history; each move is scored **once** into a reusable scratch buffer on `searchCtx` (was O(n²) rescoring inside the sort), then insertion-sorted (optimal for ~20-40 moves); the root passes its iterative-deepening `previousBest` to ordering
 - **Pseudo-legal moves + lazy `IsInCheck`**: one Make/Unmake per move (not two like LegalMoves would force)
 - **Draw checks in search**: `IsRepetition()` + `HalfmoveClock >= 100` at every node (cheap, no board scan); `IsInsufficientMaterial()` only in `CurrentStatus` (too expensive per-node)
 - **Terminal detection**: no legal moves → checkmate (`-winScore + depth`, prefer faster mates) or stalemate (0)
@@ -60,24 +61,27 @@ go-wasm/
 │   ├── uci/main.go            # UCI engine entry: standalone CLI engine for cutechess-cli testing (persistent TT, panic recovery, fallback move)
 │   └── command/main.go        # CLI debug: loads FEN, runs Perft
 ├── pkg/
-│   ├── types/types.go         # Piece uint8, CastlingRights uint8, Move struct, MoveFlag enum, Piece methods (IsWhite, IsBlack, IsEnemy, Color, TypePiece)
+│   ├── types/types.go         # Piece uint8, CastlingRights uint8, Move struct (From/To uint8 → 5-byte struct), MoveFlag enum, Piece methods (IsWhite, IsBlack, IsEnemy, Color, TypePiece)
 │   ├── engine/                # Chess rules (pure Go, no JS deps)
-│   │   ├── position.go        # Position struct (Board, WhiteToMove, CastlingRights, EnPassant*, HalfmoveClock, FullmoveNumber, Hash, KingSquares, EvalScore, undoStack[maxPly], undoPly) + Game global + reset() + Ply()
+│   │   ├── position.go        # Position struct (Board mailbox + 12 piece bitboards + 4 occupancy bitboards + pieceBBTable, WhiteToMove, CastlingRights, EnPassant*, HalfmoveClock, FullmoveNumber, Hash, KingSquares, EvalScore, undoStack[maxPly], undoPly) + Game global + reset() + Ply() + updateBitboards()
+│   │   ├── bitboard.go        # Bitboard type (uint64, LERF), file/rank masks, bitscan, knight/king precomputed attack tables, shift helpers
+│   │   ├── magic.go           # Magic bitboards for sliders: per-square magic multipliers, bishopAttacksBB/rookAttacksBB lookups, table init
+│   │   ├── magic_data.go      # Precomputed magic numbers + relevant-occupancy masks per square
 │   │   ├── evaluate.go        # MaterialValue(), piece-square tables (6×64), pstValue(), pieceTotalValue(), signedPieceValue() — shared with AI for incremental eval
 │   │   ├── helpers.go         # abs, inBounds, oppositeColor, colorOfSide(); legacy KingCheck()/Perft()
 │   │   ├── fen.go             # LoadFen(): parses all 6 FEN fields + computes initial Hash + EvalScore + StartingFEN
 │   │   ├── print.go           # PrintBoard(): ASCII debug
-│   │   ├── moves.go           # PseudoLegalMoves(ml *MoveList): iterate board, dispatch per piece type
-│   │   ├── move_captures.go   # PseudoLegalCaptures(ml *MoveList): captures + en passant + promotions only — for quiescence search
+│   │   ├── moves.go           # PseudoLegalMoves(ml *MoveList): iterate piece bitboards, dispatch per piece type
+│   │   ├── move_captures.go   # PseudoLegalCaptures(ml *MoveList): captures + en passant + promotions only (bitboard & enemyPieces) — for quiescence search
 │   │   ├── movelist.go        # MoveList: [256]Move + count (Add, Len, Get, Clear, Slice) — stack-allocatable
-│   │   ├── move_pawn.go       # Pawn moves: forward, double, captures, en passant, promotion
-│   │   ├── move_knight.go     # Knight L-jumps with IsEnemy guard
-│   │   ├── move_bishop.go     # Bishop diagonal slides with IsEnemy guard
-│   │   ├── move_rook.go       # Rook orthogonal slides with IsEnemy guard
-│   │   ├── move_king.go       # King one-step + delegates castling to generateCastling()
+│   │   ├── move_pawn.go       # Pawn moves via bitboard shifts: forward, double, captures, en passant, promotion
+│   │   ├── move_knight.go     # Knight L-jumps via precomputed knightAttacks table
+│   │   ├── move_bishop.go     # Bishop diagonal slides via magic lookup (bishopAttacksBB)
+│   │   ├── move_rook.go       # Rook orthogonal slides via magic lookup (rookAttacksBB)
+│   │   ├── move_king.go       # King one-step via kingAttacks table + delegates castling to generateCastling()
 │   │   ├── castling.go        # castleSides [4]castleSide table + generateCastling() + isPathAttacked() + isEmpty()
-│   │   ├── make.go            # Make(move) + Unmake(move): flagged make/unmake with fixed undoStack; incremental Hash, EvalScore, KingSquares updates; legacy MakeMove() bridge
-│   │   ├── attacks.go         # FindKing (O(1) via KingSquares cache), IsSquareAttacked (reverse-scan), IsInCheck
+│   │   ├── make.go            # Make(move) + Unmake(move): flagged make/unmake with fixed undoStack; incremental mailbox + bitboards (inline XOR deltas) + Hash + EvalScore + KingSquares; legacy MakeMove() bridge
+│   │   ├── attacks.go         # FindKing (O(1) via KingSquares cache), attackersTo (parallel bitboard ops), IsSquareAttacked, IsInCheck
 │   │   ├── legal.go           # LegalMoves(ml *MoveList): pseudo-legal → Make/Unmake filter; LegalMovesSlice() for WASM
 │   │   ├── status.go          # GameStatus enum + CurrentStatus(): checks IsDraw() + checkmate/stalemate
 │   │   ├── draw.go            # IsRepetition() (undo stack hash scan), IsTwoFoldRepetition(), IsFiftyMoveRule(), IsInsufficientMaterial() (zero-alloc), IsDraw()
@@ -94,9 +98,9 @@ go-wasm/
 │   │   └── draw_test.go       # Tests: threefold repetition, insufficient material (KvK, KBvK, KNvK, KBvsKB same/diff color), 50-move rule, CurrentStatus draw
 │   └── ai/                    # Chess AI (pure Go, no JS deps except build-tagged clock)
 │       ├── ai.go              # Evaluate(): O(1) read of incremental EvalScore (negated for side to move)
-│       ├── types.go           # SearchResult, searchCtx (with tt *TranspositionTable), constants (winScore=30000, negInf=-32000), shouldStop()
-│       ├── moveorder.go       # sideColor, moveOrderScore (previousBest + MVV via MaterialValue), orderMoves (insertion sort), noLegalMoveScore
-│       ├── search.go          # negamax (recursive core: TT probe + store, alpha-beta, mate score ply adjustment, repetition/50-move draw checks), scoreToTT/scoreFromTT
+│       ├── types.go           # SearchResult, searchCtx (tt, killers, history, orderScratch reusable score buffer, gen), constants (winScore=30000, negInf=-32000), shouldStop()
+│       ├── moveorder.go       # sideColor, killerTable, historyTable, moveOrderScore (previousBest/TT + MVV + killers + history), orderMoves (score-once + insertion sort), noLegalMoveScore
+│       ├── search.go          # negamax (recursive core: TT probe + store, alpha-beta, null-move pruning, LMR, killer/history recording, hasNonPawnMaterial via bitboards, mate score ply adjustment, repetition/50-move draw checks), scoreToTT/scoreFromTT
 │       ├── quiescence.go      # quiescence(): stand-pat + captures-only extension past depth 0 — prevents horizon effect
 │       ├── search_api.go      # iterativeDeepening, Search() + SearchWithTT(), SearchFixedDepth() + SearchFixedDepthWithTT() — public entry points
 │       ├── clock_wasm.go      # nowMs() via js.performance.now() — build tag: js && wasm
@@ -239,7 +243,7 @@ pkg/types            ← Move, Piece, constants
 - **Transposition table**: Zobrist hash → 16-byte entry; **gen-aware replacement** (gen+depth priority); mate score ply adjustment (`scoreToTT`/`scoreFromTT`); TT move used for move ordering
 - **Quiescence search**: at depth 0, instead of returning `Evaluate()`, search captures only until quiet (stand-pat + `PseudoLegalCaptures`); prevents horizon effect
 - **Pseudo-legal moves + lazy `IsInCheck`**: the AI uses `PseudoLegalMoves` directly, skipping `LegalMoves` — one Make/Unmake per move (not two)
-- **MVV move ordering**: captures sorted by `MaterialValue(captured)`; previousBest (ID hint) / TT move forced to index 0; insertion sort (optimal for ~20-40 moves)
+- **Move ordering**: previousBest (ID hint at root) / TT move forced to index 0, then captures by `MaterialValue(captured)` (MVV), killers, and history; each move scored **once** into a reusable `searchCtx.orderScratch` buffer (not rescored on every comparison), then insertion-sorted (optimal for ~20-40 moves)
 - **Draw checks**: `IsRepetition()` (undo stack hash scan) + `HalfmoveClock >= 100` at every node; `IsInsufficientMaterial()` only in `CurrentStatus` (too expensive per-node)
 - **Terminal detection**: no legal moves → checkmate (`-winScore + depth`, prefer faster mates) or stalemate (0); `winScore = 30000` (fits in int16 for TT)
 - **Time check**: every 2048 nodes via `nowMs()` — build-tagged (`clock_wasm.go` uses `js.performance.now()`, `clock_native.go` uses `time.Now()`); external abort via `stopCh` channel
@@ -256,17 +260,21 @@ go test ./pkg/ai/ -bench=.    # benchmarks
 
 ### Performance (native, reference)
 
-Measured on the starting position with native `go test`:
+Measured on the starting position with native `go test` (`go test ./pkg/ai/ -run TestDepthScaling$ -v`), after the hybrid bitboard migration and the move-ordering rewrite:
 
 | Time limit | Depth | Nodes | Nodes/sec |
 |---|---|---|---|
-| 100ms | 4 | 28,371 | ~498K |
-| 500ms | 4 | 28,371 | ~473K |
-| 1000ms | 5 | 246,727 | ~430K |
-| 2000ms | 5 | 246,727 | ~432K |
-| 5000ms | 6 | 1,940,230 | ~464K |
+| 100ms | 11 | 475,358 | ~5.2M |
+| 500ms | 12 | 991,407 | ~5.7M |
+| 1000ms | 13 | 3,067,735 | ~5.5M |
+| 2000ms | 14 | 7,221,586 | ~5.2M |
+| 5000ms | 15 | 18,402,270 | ~5.3M |
 
-Browser (WASM) performance is typically 2-3x slower due to WASM overhead.
+Raw perft (no search overhead) runs at ~25M nodes/sec with `Make`/`Unmake` and ~32M nodes/sec bulk-counting (`go test ./pkg/engine/ -run TestPerftSpeed -v`).
+
+Search throughput roughly **doubled** vs the pre-bitboard mailbox engine (~2.1-2.8M nodes/sec, depth 12 at 1s). Browser (WASM) performance is typically 2-3x slower than native due to WASM overhead.
+
+The current search hot spots (CPU profile) are `orderMoves` (~30%, addressable with lazy move selection) and `TranspositionTable.Probe` (~18%, memory-latency bound).
 
 ---
 

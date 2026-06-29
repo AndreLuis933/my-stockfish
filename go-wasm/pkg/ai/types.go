@@ -55,6 +55,11 @@ type searchCtx struct {
 	gen         uint8
 	killers     killerTable
 	history     historyTable
+	// orderScratch is a reusable score buffer for orderMoves. Kept on the ctx
+	// so it's allocated once per search instead of being a stack array zeroed
+	// on every node — zeroing 2KB per node was ~5% of total search time.
+	// orderMoves writes [0:n] before reading, so stale values never leak.
+	orderScratch [256]int
 	// disableNullMove turns off null-move pruning. Used by tests to A/B
 	// compare pruning behavior and by positions where pruning is known to
 	// be unsafe. A single bool checked once per node — negligible cost.

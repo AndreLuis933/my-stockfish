@@ -69,18 +69,15 @@ func scoreFromTT(score int16, ply int) int {
 // non-king material. Used to guard null-move pruning: in positions where
 // the side to move has only pawns + king, zugzwang is more likely and the
 // "pass" null move is unsafe.
+//
+// O(1) bitboard test: OR the four sliding/knight bitboards for the side to
+// move and check for any set bit. The old version scanned all 64 mailbox
+// squares on every null-move-eligible node.
 func hasNonPawnMaterial(p *engine.Position) bool {
-	moverColor := sideColor(p)
-	for _, piece := range p.Board {
-		if piece == 0 || piece.Color() != moverColor {
-			continue
-		}
-		t := piece & types.TypeMask
-		if t == types.Knight || t == types.Bishop || t == types.Rook || t == types.Queen {
-			return true
-		}
+	if p.WhiteToMove {
+		return p.WhiteKnights|p.WhiteBishops|p.WhiteRooks|p.WhiteQueens != 0
 	}
-	return false
+	return p.BlackKnights|p.BlackBishops|p.BlackRooks|p.BlackQueens != 0
 }
 
 // negamax is the recursive search core. Returns the score from the perspective
@@ -225,9 +222,18 @@ func negamax(p *engine.Position, depth, alpha, beta int, ctx *searchCtx, previou
 		}
 	}
 
+	// Ordering hint forced to index 0: prefer previousBest (the iterative
+	// deepening result at the root) when present, else the TT move. previousBest
+	// is only non-nil at the root, where it's the strongest hint available — the
+	// TT entry may have been evicted or stored from a shallower context.
+	orderingHint := ttMove
+	if previousBest != nil {
+		orderingHint = previousBest
+	}
+
 	var ml engine.MoveList
 	p.PseudoLegalMoves(&ml)
-	orderMoves(&ml, ttMove, &ctx.killers, &ctx.history, ply)
+	orderMoves(&ml, orderingHint, &ctx.killers, &ctx.history, ply, &ctx.orderScratch)
 
 	best := negInf
 	bestMove := types.Move{}

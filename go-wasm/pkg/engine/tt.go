@@ -59,8 +59,8 @@ func UnpackMove(packed uint16) (types.Move, bool) {
 	if packed == 0 {
 		return types.Move{}, false
 	}
-	from := int(packed >> 10)
-	to := int((packed >> 4) & 0x3F)
+	from := uint8(packed >> 10)
+	to := uint8((packed >> 4) & 0x3F)
 	promoCode := int(packed & 0xF)
 
 	var promotion types.Piece

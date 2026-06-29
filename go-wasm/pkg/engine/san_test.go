@@ -24,7 +24,7 @@ func TestToSan_StartingPosition(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			m := types.Move{From: tc.from, To: tc.to}
+			m := types.Move{From: uint8(tc.from), To: uint8(tc.to)}
 			piece := Game.Board[tc.from]
 			if piece&types.Pawn != 0 && abs(tc.to-tc.from) == 2*boardSize {
 				m.Flag = types.FlagDoublePush
@@ -55,7 +55,7 @@ func TestToSan_OpenPosition(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			m := types.Move{From: tc.from, To: tc.to}
+			m := types.Move{From: uint8(tc.from), To: uint8(tc.to)}
 			san, err := Game.ToSan(m)
 			if err != nil {
 				t.Fatalf("ToSan error: %v", err)

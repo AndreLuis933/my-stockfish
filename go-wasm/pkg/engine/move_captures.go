@@ -42,7 +42,7 @@ func (p *Position) PseudoLegalCaptures(ml *MoveList) {
 		for targets != 0 {
 			to := bitscan(targets)
 			targets &= targets - 1
-			ml.Add(types.Move{From: i, To: to, Flag: types.FlagNormal, Captured: p.Board[to]})
+			ml.Add(types.Move{From: uint8(i), To: uint8(to), Flag: types.FlagNormal, Captured: p.Board[to]})
 		}
 	}
 
@@ -55,7 +55,7 @@ func (p *Position) PseudoLegalCaptures(ml *MoveList) {
 		for targets != 0 {
 			to := bitscan(targets)
 			targets &= targets - 1
-			ml.Add(types.Move{From: i, To: to, Flag: types.FlagNormal, Captured: p.Board[to]})
+			ml.Add(types.Move{From: uint8(i), To: uint8(to), Flag: types.FlagNormal, Captured: p.Board[to]})
 		}
 	}
 
@@ -68,7 +68,7 @@ func (p *Position) PseudoLegalCaptures(ml *MoveList) {
 		for targets != 0 {
 			to := bitscan(targets)
 			targets &= targets - 1
-			ml.Add(types.Move{From: i, To: to, Flag: types.FlagNormal, Captured: p.Board[to]})
+			ml.Add(types.Move{From: uint8(i), To: uint8(to), Flag: types.FlagNormal, Captured: p.Board[to]})
 		}
 	}
 
@@ -81,7 +81,7 @@ func (p *Position) PseudoLegalCaptures(ml *MoveList) {
 		for targets != 0 {
 			to := bitscan(targets)
 			targets &= targets - 1
-			ml.Add(types.Move{From: i, To: to, Flag: types.FlagNormal, Captured: p.Board[to]})
+			ml.Add(types.Move{From: uint8(i), To: uint8(to), Flag: types.FlagNormal, Captured: p.Board[to]})
 		}
 	}
 
@@ -92,7 +92,7 @@ func (p *Position) PseudoLegalCaptures(ml *MoveList) {
 		for targets != 0 {
 			to := bitscan(targets)
 			targets &= targets - 1
-			ml.Add(types.Move{From: i, To: to, Flag: types.FlagNormal, Captured: p.Board[to]})
+			ml.Add(types.Move{From: uint8(i), To: uint8(to), Flag: types.FlagNormal, Captured: p.Board[to]})
 		}
 	}
 
@@ -100,7 +100,7 @@ func (p *Position) PseudoLegalCaptures(ml *MoveList) {
 }
 
 // capturePawnBB generates pawn captures, en passant, and promotion pushes
-// using bitboard shifts. This is the bitboard version of capturePawn.
+// using bitboard shifts.
 func (p *Position) capturePawnBB(piece types.Piece, i int, ml *MoveList, enemyPieces Bitboard) {
 	isWhite := piece&types.ColorWhite == types.ColorWhite
 	myColor := piece.Color()
@@ -123,7 +123,7 @@ func (p *Position) capturePawnBB(piece types.Piece, i int, ml *MoveList, enemyPi
 			if toRow == promotionRow {
 				promotionPawn(i, to, myColor, p.Board[to], ml)
 			} else {
-				ml.Add(types.Move{From: i, To: to, Flag: types.FlagNormal, Captured: p.Board[to]})
+				ml.Add(types.Move{From: uint8(i), To: uint8(to), Flag: types.FlagNormal, Captured: p.Board[to]})
 			}
 		}
 
@@ -131,7 +131,7 @@ func (p *Position) capturePawnBB(piece types.Piece, i int, ml *MoveList, enemyPi
 		if p.EnPassantTarget != -1 {
 			epBB := ((pawnBB & notA) << 7) | ((pawnBB & notH) << 9)
 			if epBB&(1<<p.EnPassantTarget) != 0 {
-				ml.Add(types.Move{From: i, To: p.EnPassantTarget, Flag: types.FlagEnPassant, Captured: p.Board[p.EnPassantCapture]})
+				ml.Add(types.Move{From: uint8(i), To: uint8(p.EnPassantTarget), Flag: types.FlagEnPassant, Captured: p.Board[p.EnPassantCapture]})
 			}
 		}
 
@@ -153,7 +153,7 @@ func (p *Position) capturePawnBB(piece types.Piece, i int, ml *MoveList, enemyPi
 			if toRow == promotionRow {
 				promotionPawn(i, to, myColor, p.Board[to], ml)
 			} else {
-				ml.Add(types.Move{From: i, To: to, Flag: types.FlagNormal, Captured: p.Board[to]})
+				ml.Add(types.Move{From: uint8(i), To: uint8(to), Flag: types.FlagNormal, Captured: p.Board[to]})
 			}
 		}
 
@@ -161,7 +161,7 @@ func (p *Position) capturePawnBB(piece types.Piece, i int, ml *MoveList, enemyPi
 		if p.EnPassantTarget != -1 {
 			epBB := ((pawnBB & notH) >> 7) | ((pawnBB & notA) >> 9)
 			if epBB&(1<<p.EnPassantTarget) != 0 {
-				ml.Add(types.Move{From: i, To: p.EnPassantTarget, Flag: types.FlagEnPassant, Captured: p.Board[p.EnPassantCapture]})
+				ml.Add(types.Move{From: uint8(i), To: uint8(p.EnPassantTarget), Flag: types.FlagEnPassant, Captured: p.Board[p.EnPassantCapture]})
 			}
 		}
 
