@@ -100,6 +100,7 @@ export const useChess = (
   const {
     applyMove,
     handleSquareClick,
+    playMove,
     choosePromotion,
     cancelPromotion,
   } = useChessMoves({
@@ -193,6 +194,7 @@ export const useChess = (
       currentPly,
       isAtLatest,
       handleSquareClick,
+      playMove,
       restartGame,
       choosePromotion,
       cancelPromotion,
@@ -220,6 +222,7 @@ export const useChess = (
       currentPly,
       isAtLatest,
       handleSquareClick,
+      playMove,
       restartGame,
       choosePromotion,
       cancelPromotion,

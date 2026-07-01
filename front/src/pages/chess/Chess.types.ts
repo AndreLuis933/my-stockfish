@@ -38,6 +38,7 @@ export interface UseChessReturn {
   currentPly: number;
   isAtLatest: boolean;
   handleSquareClick: (index: number) => Promise<void>;
+  playMove: (from: number, to: number, promotion?: number) => Promise<void>;
   restartGame: () => Promise<void>;
   choosePromotion: (promotionByte: number) => Promise<void>;
   cancelPromotion: () => void;

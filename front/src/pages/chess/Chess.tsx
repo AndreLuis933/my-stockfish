@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ChessBoard } from "@/components/ChessBoard/ChessBoard";
 import { MoveHistory } from "@/components/MoveHistory/MoveHistory";
 import { PromotionPicker } from "@/components/PromotionPicker/PromotionPicker";
@@ -10,15 +10,17 @@ import { TurnBanner } from "@/components/chess/TurnBanner";
 import { ClockConfigPanel } from "@/components/chess/ClockConfigPanel";
 import { ActionBar } from "@/components/chess/ActionBar";
 import { AnalysisSummary } from "@/components/chess/AnalysisSummary";
+import { BookMovesPanel } from "@/components/chess/BookMovesPanel";
 import { PgnImportModal } from "@/components/chess/PgnImportModal";
 import type { ClockConfig } from "@/hooks/useChessClock";
 import { minutesToMs } from "@/hooks/useChessClock";
 import { useChessKeyboard } from "@/hooks/useChessKeyboard";
 import { useMultiPvControl } from "@/hooks/useMultiPvControl";
-import type { AiAnalysisResult } from "@/wasm/generated/wasm-contract";
+import type { AiAnalysisResult, BookMoveEntry } from "@/wasm/generated/wasm-contract";
 import type { ChessColor } from "@/types/chess";
 import type { ChessDifficulty, ChessGameMode, ChessSearchMode } from "./Chess.types";
 import { useChess } from "./Chess.hooks";
+import { useWasm } from "@/wasm/useWasm";
 import styles from "./Chess.module.css";
 
 const RESULT_TEXT = {
@@ -51,6 +53,7 @@ export const Chess = () => {
     currentPly,
     isAtLatest,
     handleSquareClick,
+    playMove,
     restartGame,
     choosePromotion,
     cancelPromotion,
@@ -108,6 +111,36 @@ export const Chess = () => {
   const [pgnText, setPgnText] = useState("");
   const [pgnError, setPgnError] = useState<string | null>(null);
   const [copyStatus, setCopyStatus] = useState<"idle" | "copied">("idle");
+
+  const { engine: wasmEngine } = useWasm();
+
+  const [showBookMoves, setShowBookMoves] = useState(false);
+  const [bookMovesResult, setBookMovesResult] = useState<BookMoveEntry[] | null>(null);
+
+  useEffect(() => {
+    if (!wasmEngine || !showBookMoves || result || !isAtLatest) {
+      return;
+    }
+    let cancelled = false;
+    wasmEngine
+      .bookMoves()
+      .then((json) => {
+        if (!cancelled) setBookMovesResult(JSON.parse(json) as BookMoveEntry[]);
+      })
+      .catch(() => {
+        if (!cancelled) setBookMovesResult([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [wasmEngine, showBookMoves, board, currentPlayer, result, isAtLatest]);
+
+  const bookMovesData = showBookMoves && !result && isAtLatest ? (bookMovesResult ?? []) : [];
+  const bookMovesLoading = showBookMoves && !result && isAtLatest && bookMovesResult === null;
+
+  const handlePlayBookMove = (from: number, to: number, promotion?: number) => {
+    playMove(from, to, promotion);
+  };
 
   const savedAnalysis = isAtLatest ? null : analysisForPly(currentPly) ?? null;
   const displayedAnalysis = isAtLatest ? analysis : savedAnalysis;
@@ -295,12 +328,24 @@ export const Chess = () => {
             analysisEnabled={analysisEnabled}
             onToggleAnalysis={() => setAnalysisEnabled((v) => !v)}
             hasHistory={history.length > 0}
+            showBookMoves={showBookMoves}
+            onToggleBookMoves={() => setShowBookMoves((v) => !v)}
           />
 
           {displayedAnalysis && (
             <AnalysisSummary
               analysis={displayedAnalysis}
               onClose={isAtLatest ? () => setAnalysis(null) : undefined}
+            />
+          )}
+
+          {showBookMoves && (
+            <BookMovesPanel
+              moves={bookMovesData}
+              loading={bookMovesLoading}
+              currentPlayer={currentPlayer}
+              onPlayMove={handlePlayBookMove}
+              onClose={() => setShowBookMoves(false)}
             />
           )}
         </div>

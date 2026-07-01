@@ -9,6 +9,8 @@ export interface WasmContract {
   aiMoveDepth: { args: [number]; return: string };
   aiAnalysis: { args: [number]; return: string };
   aiMultiPv: { args: [number, number]; return: string };
+  loadBook: { args: [Uint8Array]; return: boolean };
+  bookMoves: { args: []; return: string };
   fen: { args: []; return: string };
   san: { args: [number, number, number?]; return: string };
   applyPgn: { args: [string]; return: string };
@@ -47,6 +49,14 @@ export interface PgnHistoryEntry {
   boardAfter: number[];
   checkSquare: number;
   isCheckmate: boolean;
+}
+
+export interface BookMoveEntry {
+  from: number;
+  to: number;
+  promotion?: number;
+  weight: number;
+  san: string;
 }
 
 export type WasmFunctionName = keyof WasmContract;

@@ -54,6 +54,7 @@ my-stockfish/
 │       │       ├── ClockConfigPanel.tsx   # Clock presets + increment
 │       │       ├── ActionBar.tsx          # Reiniciar/Girar/Copiar/Colar/Analisar/Auto buttons
 │       │       ├── AnalysisSummary.tsx     # Inline eval/best-move/depth panel
+│       │       ├── BookMovesPanel.tsx     # Opening book moves panel (SAN + weight bars, click-to-play)
 │       │       ├── PgnImportModal.tsx     # PGN paste modal
 │       │       └── ChessShared.module.css # Shared styles for all chess sub-components (391 lines)
 │       ├── hooks/
@@ -74,11 +75,17 @@ my-stockfish/
 │       └── assets/                # Static images (hero, react/vite svg)
 ├── go-wasm/                        # Go source compiled to WASM (module: webassemble, go 1.25)
 │   ├── cmd/
-│   │   ├── wasm/main.go           # WASM entry: registers goWasmEngine.{validMovesChess, initBoard, makeMove, isCheckJS, gameStatus, aiMove, aiMoveDepth, aiAnalysis, aiMultiPv, fen, san, applyPgn}
-│   │   ├── uci/main.go            # UCI engine entry: standalone CLI engine for cutechess-cli testing (persistent TT, panic recovery, fallback move)
+│   │   ├── wasm/main.go           # WASM entry: registers goWasmEngine.{validMovesChess, initBoard, makeMove, isCheckJS, gameStatus, aiMove, aiMoveDepth, aiAnalysis, aiMultiPv, loadBook, fen, san, applyPgn}
+│   │   ├── uci/main.go            # UCI engine entry: standalone CLI engine for cutechess-cli testing (persistent TT, panic recovery, fallback move, -book flag for opening book)
 │   │   └── command/main.go        # CLI debug entry: loads FEN, runs Perft depths 1-5
 │   ├── pkg/
 │   │   ├── types/types.go         # Piece uint8 (type bits + color bits), CastlingRights uint8 (KQkq), Move struct (with Flag + Captured), MoveFlag enum, Piece methods (IsWhite, IsBlack, IsEnemy, Color, TypePiece)
+│   │   ├── book/                  # Polyglot opening book (pure Go, no JS deps)
+│   │   │   ├── polyglot_keys.go   # 781 fixed polyglot random constants (generated from python-chess)
+│   │   │   ├── polyglot_hash.go   # PolyglotHash(p *Position): polyglot Zobrist hash (independent of engine's own Zobrist) + canCaptureEnPassant check
+│   │   │   ├── polyglot_move.go   # DecodePolyglotMove(uint16) Move + MatchLegalMove(p, bookMove) — resolves flags via LegalMoves
+│   │   │   ├── book.go            # Book type: Load([]byte)/LoadFile(path), Probe(hash) []Entry, PickMove(hash, rng) (weighted random), PickBestMove(hash)
+│   │   │   └── book_test.go       # Tests: hash correctness (verified vs python-chess), probe, weighted pick, move decode, real book load
 │   │   ├── engine/                # Chess rules (pure Go, no JS deps)
 │   │   │   ├── position.go        # Position struct (Board mailbox + 12 piece bitboards + 4 occupancy bitboards + pieceBBTable lookup, WhiteToMove, CastlingRights, EnPassant*, HalfmoveClock, FullmoveNumber, Hash, KingSquares, EvalScore, undoStack[maxPly], undoPly) + Game global + reset() + Ply() + updateBitboards()
 │   │   │   ├── bitboard.go        # Bitboard type (uint64, LERF a1=0..h8=63), file/rank masks, bitscan (math/bits), precomputed knightAttacks/kingAttacks tables, shift helpers
@@ -131,6 +138,9 @@ my-stockfish/
 │   ├── match-engines.ps1          # Runs cutechess-cli match between two saved engine binaries
 │   ├── engines/                    # Saved engine binaries + match PGNs (versioned testing)
 │   └── ROADMAP.md                  # AI improvement roadmap (TT, quiescence, killers, LMR, bitboards, parallel)
+├── scripts/
+│   └── build-book.py               # Polyglot opening book builder: parse PGN → filter by Elo → Stockfish quality filter → write .bin (4 subcommands: parse/filter/analyze/write)
+├── stockfish.exe                   # Stockfish 17 binary (used by build-book.py for quality filtering; gitignored)
 ├── AGENTS.md                       # This file
 ├── CLAUDE.md                       # Symlink/global coding preferences
 └── .gitignore
@@ -192,6 +202,7 @@ my-stockfish/
 - **Keyboard navigation**: ArrowLeft/ArrowRight navigate history (prev/next ply), Home/End jump to start/end; disabled when the promotion picker is open (works even after game over)
 - **Position analysis**: "Analisar" button runs the AI search on the current position and shows the evaluation score (in pawns), best move (with an arrow drawn on the board), and search depth; closeable panel
 - **Auto-analyze**: "Analisar auto" toggle automatically runs a 500ms analysis after each move and stores the evaluation in the move history; per-move eval tags appear next to each move in the sidebar
+- **Opening book**: Polyglot `.bin` opening book integrated — both UCI engine (`-book` flag) and WASM browser (`loadBook` + `worker.js` fetch) probe the book before search; weighted random selection adds variety across games; book built from lichess standard games (Elo ≥ 2000, first 10 moves, Stockfish quality-filtered at ±100cp, blended 50/50 popularity+quality weights normalized to 100 per position); **"Livro" toggle button** in the action bar shows all book moves for the current position with SAN + weight bars (click a move to play it)
 - Board flip, turn banner, result overlay
 
 **AI architecture**
@@ -219,7 +230,7 @@ my-stockfish/
 
 | Piece | Notes |
 |---|---|
-| Opening book | No opening repertoire — AI plays from first principles every game |
+| Opening book | Polyglot `.bin` opening book integrated — `pkg/book/` reads position→move entries with weighted random selection; both UCI (`-book` flag) and WASM (`loadBook` + `worker.js` fetch) probe the book before search. Book built from lichess standard games (Elo ≥ 2000, first 10 moves, Stockfish quality-filtered, blended popularity+quality weights). |
 | Lazy move selection | `orderMoves` fully sorts the move list up front (~30% of search time, the #1 hot spot). Picking the best *remaining* move on demand inside the negamax loop would skip ordering moves never searched after a beta cutoff — the next planned search optimization. |
 | Parallel search | No goroutine-based parallel search yet — needs thread-safe TT (Phase 4) |
 | Type generator auto-run | The Vite plugin does **not** run the type generator — it only builds the WASM and sends HMR. `wasm-contract.ts` is maintained by hand. |
@@ -252,10 +263,12 @@ React component
 | `makeMove` | `makeMoveJS` | `engine.MakeMove(from, to, promotion)` | `number, number, number?` | `number[]` (64 board bytes) |
 | `isCheckJS` | `isCheckJS` | `engine.KingCheck()` | — | `number` (checked king's square index, or -1) |
 | `gameStatus` | `gameStatusJS` | `engine.CurrentStatus().String()` | — | `string` (`"playing"` \| `"white-wins"` \| `"black-wins"` \| `"draw"`) |
-| `aiMove` | `aiMoveJS` | `ai.SearchWithTT(engine.Game, timeLimitMs, nil, sharedTT)` | `number` (time limit ms) | JSON string `{from, to, promotion?}` |
-| `aiMoveDepth` | `aiMoveDepthJS` | `ai.SearchFixedDepthWithTT(engine.Game, depth, nil, sharedTT)` | `number` (depth) | JSON string `{from, to, promotion?}` |
-| `aiAnalysis` | `aiAnalysisJS` | `ai.SearchWithTT(engine.Game, timeLimitMs, nil, sharedTT)` | `number` (time limit ms) | JSON string `{from, to, promotion?, score, depth, nodes, timeMs}` |
+| `aiMove` | `aiMoveJS` | `ai.SearchWithTT(engine.Game, timeLimitMs, nil, sharedTT)` — probes `sharedBook` first via `book.PolyglotHash` + `PickMove` | `number` (time limit ms) | JSON string `{from, to, promotion?}` |
+| `aiMoveDepth` | `aiMoveDepthJS` | `ai.SearchFixedDepthWithTT(engine.Game, depth, nil, sharedTT)` — probes `sharedBook` first | `number` (depth) | JSON string `{from, to, promotion?}` |
+| `aiAnalysis` | `aiAnalysisJS` | `ai.SearchWithTT(engine.Game, timeLimitMs, nil, sharedTT)` — probes `sharedBook` first (returns score=0, depth=0 on book hit) | `number` (time limit ms) | JSON string `{from, to, promotion?, score, depth, nodes, timeMs}` |
 | `aiMultiPv` | `aiMultiPvJS` | — | `number, number` (time, numLines) | JSON string (multi-PV lines) |
+| `loadBook` | `loadBookJS` | `book.Load([]byte)` — loads a polyglot `.bin` from a Uint8Array | `Uint8Array` | `boolean` |
+| `bookMoves` | `bookMovesJS` | `sharedBook.Probe(PolyglotHash)` → decode + SAN for each entry | — | JSON string of `BookMoveEntry[]` (`{from, to, promotion?, weight, san}`) |
 | `fen` | `fenJS` | — | — | `string` (current FEN) |
 | `san` | `sanJS` | `engine.Game.ToSan(move)` | `number, number, number?` (from, to, promotion?) | `string` (SAN) |
 | `applyPgn` | `applyPgnJS` | — | `string` (PGN) | JSON string of `PgnHistoryEntry[]` |
@@ -334,6 +347,26 @@ pkg/types            ← Move, Piece, constants
 
 The AI uses `PseudoLegalMoves` + lazy `IsInCheck` (one Make/Unmake per move, not two). At depth 0, it calls `quiescence()` which uses `PseudoLegalCaptures` (captures only). Move ordering forces previousBest/TT-move to index 0, then MVV (captures by `MaterialValue`) + killers + history, scoring each move once into a reusable buffer. The clock is build-tagged: `clock_wasm.go` uses `js.performance.now()`, `clock_native.go` uses `time.Now()`. The `pkg/ai` package compiles and tests natively with `go test ./pkg/ai/` — no WASM needed for development.
 
+### Opening book architecture
+
+```
+cmd/wasm/main.go / cmd/uci/main.go
+    ↓ imports
+pkg/book             ← Load(), LoadFile(), PolyglotHash(), PickMove(), DecodePolyglotMove(), MatchLegalMove()
+│   ├── polyglot_keys.go    781 fixed random constants (from python-chess POLYGLOT_RANDOM_ARRAY)
+│   ├── polyglot_hash.go    PolyglotHash(p *Position) — independent Zobrist hash (piece keys: (type-1)*2+color, color 0=black 1=white; castling: 768-771; ep: 772-779 only if capture available; turn: 780 if white to move)
+│   ├── polyglot_move.go    DecodePolyglotMove(uint16) Move + MatchLegalMove(p, bookMove) — resolves flags via LegalMoves
+│   └── book.go             Book type: Load([]byte)/LoadFile(path), Probe(hash) []Entry (binary search), PickMove(hash, rng) (weighted random), PickBestMove(hash)
+    ↓ imports
+pkg/engine           ← Position, LegalMoves (for MatchLegalMove)
+    ↓ imports
+pkg/types            ← Move, Piece, CastlingRights
+```
+
+Both the UCI engine and the WASM bridge probe the opening book **before** invoking the AI search. On a book hit, the engine returns the book move instantly (UCI: `info string book move` + `bestmove`; WASM: same JSON shape as a search result). On a miss, the normal search runs. The polyglot hash is independent of the engine's own Zobrist hash (different random constants) — computed on demand from the Position's board/castling/ep/turn state. Book moves are matched against `LegalMoves` to resolve `Flag`/`Captured`/`Promotion` correctly (the polyglot encoding doesn't carry flag information).
+
+**Book building** (`scripts/build-book.py`): a 4-phase Python pipeline that parses a PGN database, filters by Elo, applies a popularity threshold + top-5-per-position limit, runs Stockfish quality filtering (absolute ±100cp gate + quality_score relative to best), and writes a sorted `.bin` with blended 50/50 popularity+quality weights normalized to sum=100 per position. Supports `--max-time` (stop and write partial book), `--resume` (checkpoint recovery), and progress bars (tqdm).
+
 ### Type safety pipeline
 
 ```
@@ -368,6 +401,7 @@ Standalone CLI chess engine implementing the UCI protocol. Used for testing agai
 - **Fallback move**: if search returns empty (aborted/game over), picks the first legal move
 - **Stdout flush**: `os.Stdout.Sync()` after `bestmove` to avoid buffering issues with cutechess
 - **Time management**: `wtime/40 + winc*4/5`, capped at half the remaining clock; `movetime` overrides; `depth`/`infinite` = no time limit
+- **Opening book**: `-book <path>` CLI flag loads a polyglot `.bin` book; probed before search with weighted random selection (`info string book move` + instant `bestmove` on hit)
 
 ### Testing tools
 
@@ -398,11 +432,25 @@ $env:GOOS="js"; $env:GOARCH="wasm"; go build -o ../front/public/wasm/engine.wasm
 # UCI engine build (from go-wasm/)
 go build -o bin/my-stockfish.exe ./cmd/uci
 
+# UCI engine with opening book (from go-wasm/)
+go build -o bin/my-stockfish.exe ./cmd/uci
+./bin/my-stockfish.exe -book books/book.bin
+
 # cutechess-cli testing (from go-wasm/)
 .\save-engine.ps1                          # save current engine to engines/
 .\save-engine.ps1 -Tag experiment           # save with a tag
 .\match-engines.ps1 old.exe new.exe         # match two saved engines
 .\match-engines.ps1 old.exe new.exe -rounds 100 -concurrency 16
+
+# Opening book builder (from project root)
+# Phase 1: parse PGN → raw entries (byte-based progress bar, ~60 min for 2.7GB)
+python scripts/build-book.py parse games.pgn -o raw.json --min-elo 2000
+# Phase 2: popularity filter + top-5 per position (instant)
+python scripts/build-book.py filter raw.json -o popular.json --min-move-games 5 --max-moves-per-position 5
+# Phase 3: Stockfish quality filter + blended weights (progress bar, --max-time safety, --resume)
+python scripts/build-book.py analyze popular.json -o filtered.json --depth 12 --eval-range 100 --max-time 3600
+# Phase 4: write sorted .bin (instant)
+python scripts/build-book.py write filtered.json -o go-wasm/books/book.bin
 
 # Type generator (from go-wasm/) — optional, for a starting point only
 go build -o bin/gen-types.exe tools/main.go

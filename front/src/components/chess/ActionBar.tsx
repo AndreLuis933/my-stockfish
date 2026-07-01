@@ -16,6 +16,8 @@ interface ActionBarProps {
   analysisEnabled: boolean;
   onToggleAnalysis: () => void;
   hasHistory: boolean;
+  showBookMoves: boolean;
+  onToggleBookMoves: () => void;
 }
 
 export const ActionBar = ({
@@ -34,6 +36,8 @@ export const ActionBar = ({
   analysisEnabled,
   onToggleAnalysis,
   hasHistory,
+  showBookMoves,
+  onToggleBookMoves,
 }: ActionBarProps) => (
   <div className={styles.actions}>
     <button className={styles.actionButton} onClick={onRestart}>
@@ -88,5 +92,12 @@ export const ActionBar = ({
         {analysisEnabled ? "Análise ⏸" : "Análise ▶"}
       </button>
     )}
+    <button
+      className={`${styles.actionButton} ${showBookMoves ? styles.actionButtonActive : ""}`}
+      onClick={onToggleBookMoves}
+      title="Mostra os lances do livro de aberturas para a posição atual"
+    >
+      {showBookMoves ? "Livro ✓" : "Livro"}
+    </button>
   </div>
 );

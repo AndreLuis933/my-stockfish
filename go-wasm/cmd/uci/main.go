@@ -2,7 +2,9 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -10,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"webassemble/pkg/book"
 	"webassemble/pkg/engine"
 )
 
@@ -45,19 +48,33 @@ func dbg(format string, args ...any) { debugLog.write(format, args...) }
 // goroutine (reading stdin); the search runs in its own goroutine and
 // communicates only via channels.
 type uciSession struct {
-	pos engine.Position
-	tt  *engine.TranspositionTable
+	pos  engine.Position
+	tt   *engine.TranspositionTable
+	book *book.Book
+	rng  *rand.Rand
 
 	searchMu   sync.Mutex
 	stopCh     chan struct{}
 	searchDone chan struct{}
 }
 
-func newSession() *uciSession {
+func newSession(bookPath string) *uciSession {
 	s := &uciSession{
-		tt: engine.DefaultTranspositionTable(),
+		tt:  engine.DefaultTranspositionTable(),
+		rng: rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 	s.pos.LoadFen(engine.StartingFEN)
+
+	if bookPath != "" {
+		b, err := book.LoadFile(bookPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not load opening book %s: %v\n", bookPath, err)
+		} else {
+			s.book = b
+			dbg("loaded opening book: %s (%d entries)", bookPath, b.Len())
+		}
+	}
+
 	return s
 }
 
@@ -85,6 +102,9 @@ func initDebug() {
 }
 
 func main() {
+	bookPath := flag.String("book", "", "path to polyglot opening book .bin file")
+	flag.Parse()
+
 	initDebug()
 	defer func() {
 		if debugLog != nil && debugLog.f != nil {
@@ -92,7 +112,7 @@ func main() {
 		}
 	}()
 
-	s := newSession()
+	s := newSession(*bookPath)
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 

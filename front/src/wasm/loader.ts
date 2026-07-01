@@ -11,6 +11,7 @@ class WasmWorkerEngineCore {
   private nextId = 0;
   private _ready = false;
   private _initError: string | null = null;
+  private _restartPromise: Promise<void> | null = null;
 
   get initError(): string | null {
     return this._initError;
@@ -63,6 +64,19 @@ class WasmWorkerEngineCore {
   }
 
   restart(): Promise<void> {
+    // Multiple consumers share this engine (see loadWasmEngine), so several may
+    // request a restart for the same HMR event. De-dupe to a single in-flight
+    // restart so we don't terminate a worker mid-swap or leak workers.
+    if (this._restartPromise) return this._restartPromise;
+    this._restartPromise = this.doRestart();
+    const clear = () => {
+      this._restartPromise = null;
+    };
+    this._restartPromise.then(clear, clear);
+    return this._restartPromise;
+  }
+
+  private doRestart(): Promise<void> {
     return new Promise((resolve, reject) => {
       this._ready = false;
       this._initError = null;
@@ -118,20 +132,33 @@ export class WasmWorkerEngine extends WasmWorkerEngineCore implements WasmEngine
   aiMoveDepth = this.fn("aiMoveDepth");
   aiAnalysis = this.fn("aiAnalysis");
   aiMultiPv = this.fn("aiMultiPv");
+  loadBook = this.fn("loadBook");
+  bookMoves = this.fn("bookMoves");
   fen = this.fn("fen");
   san = this.fn("san");
   applyPgn = this.fn("applyPgn");
 }
 
-export async function loadWasmEngine(): Promise<WasmEngine> {
+// The engine holds the authoritative game position inside its worker. Every
+// consumer must share one worker — separate workers would each carry their own
+// divergent game state (the bug where bookMoves saw an empty board). So the
+// engine is a module-level singleton, created once and reused across all
+// useWasm() callers.
+let enginePromise: Promise<WasmEngine> | null = null;
+
+export function loadWasmEngine(): Promise<WasmEngine> {
+  if (enginePromise) return enginePromise;
+
   const engine = new WasmWorkerEngine();
-  await new Promise<void>((resolve, reject) => {
+  enginePromise = new Promise<WasmEngine>((resolve, reject) => {
     const check = () => {
-      if (engine.ready) { resolve(); return; }
+      if (engine.ready) { resolve(engine); return; }
       if (engine.initError) { reject(new Error(engine.initError)); return; }
       setTimeout(check, 50);
     };
     check();
   });
-  return engine;
+  // Allow a later mount to retry if initialization failed.
+  enginePromise.catch(() => { enginePromise = null; });
+  return enginePromise;
 }

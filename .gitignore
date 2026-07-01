@@ -1,2 +1,20 @@
 .vscode
 PRDs/
+stockfish.exe
+
+# Opening books (built locally, not committed)
+go-wasm/books/
+# ...except the deployed frontend book: Vercel serves it as a static asset and
+# does NOT regenerate it at build time (unlike engine.wasm), so it must be tracked.
+
+*.pyc
+
+# PGN databases and build intermediates
+*.pgn
+*.pgn.zst
+*.raw.json
+*.popular.json
+*.filtered.json
+*.checkpoint.json
+*.checkpoint.json.tmp
+*.tmp

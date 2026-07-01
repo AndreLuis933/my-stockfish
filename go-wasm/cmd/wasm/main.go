@@ -4,9 +4,14 @@ package main
 
 import (
 	"encoding/json"
+	"math/rand"
+	"sort"
 	"strings"
 	"syscall/js"
+	"time"
+
 	"webassemble/pkg/ai"
+	"webassemble/pkg/book"
 	"webassemble/pkg/engine"
 	"webassemble/pkg/types"
 )
@@ -60,14 +65,127 @@ func makeMoveJS(_ js.Value, args []js.Value) interface{} {
 // the UCI engine's session-level TT.
 var sharedTT = engine.DefaultTranspositionTable()
 
+// sharedBook is the opening book, loaded from a .bin file via loadBookJS.
+// May be nil if no book is loaded — the AI searches normally in that case.
+var sharedBook *book.Book
+
+// sharedRng is the random number generator for weighted book move selection.
+var sharedRng = rand.New(rand.NewSource(time.Now().UnixNano()))
+
 func initBoardJs(_ js.Value, _ []js.Value) interface{} {
 	sharedTT.Clear()
 	engine.LoadFen(engine.StartingFEN)
 	return getBoard()
 }
 
+// loadBookJS loads a polyglot .bin book from a Uint8Array passed from JS.
+// Called by worker.js after fetching books/book.bin. Fails silently if the
+// data is invalid — the engine works fine without a book.
+func loadBookJS(_ js.Value, args []js.Value) interface{} {
+	if len(args) == 0 || args[0].Type() != js.TypeObject {
+		return js.ValueOf(false)
+	}
+
+	jsArray := args[0]
+	length := jsArray.Get("byteLength").Int()
+	if length == 0 {
+		return js.ValueOf(false)
+	}
+
+	data := make([]byte, length)
+	js.CopyBytesToGo(data, jsArray)
+
+	b, err := book.Load(data)
+	if err != nil {
+		println("[go-wasm] book.Load error:", err.Error())
+		return js.ValueOf(false)
+	}
+
+	sharedBook = b
+	println("[go-wasm] book loaded:", b.Len(), "entries")
+	return js.ValueOf(true)
+}
+
+// probeBook checks the opening book for the current position and returns
+// a matched legal move, or (zero Move, false) on miss.
+func probeBook() (types.Move, bool) {
+	if sharedBook == nil {
+		return types.Move{}, false
+	}
+	hash := book.PolyglotHash(engine.Game)
+	polyMove, ok := sharedBook.PickMove(hash, sharedRng)
+	if !ok {
+		return types.Move{}, false
+	}
+	bookMove := book.DecodePolyglotMove(polyMove)
+	return book.MatchLegalMove(engine.Game, bookMove)
+}
+
+// bookMovesJS returns all book moves for the current position as JSON.
+// Each entry: {from, to, promotion?, weight, san}.
+// Returns "[]" if no book is loaded or the position is not in the book.
+func bookMovesJS(_ js.Value, _ []js.Value) interface{} {
+	if sharedBook == nil {
+		return js.ValueOf("[]")
+	}
+
+	hash := book.PolyglotHash(engine.Game)
+	entries := sharedBook.Probe(hash)
+	if len(entries) == 0 {
+		return js.ValueOf("[]")
+	}
+
+	type bookMoveJSON struct {
+		From      int    `json:"from"`
+		To        int    `json:"to"`
+		Promotion *int   `json:"promotion,omitempty"`
+		Weight    int    `json:"weight"`
+		San       string `json:"san"`
+	}
+
+	out := make([]bookMoveJSON, 0, len(entries))
+	for _, e := range entries {
+		bookMove := book.DecodePolyglotMove(e.Move)
+		legal, matched := book.MatchLegalMove(engine.Game, bookMove)
+		if !matched {
+			continue
+		}
+		san, err := engine.Game.ToSan(legal)
+		if err != nil {
+			san = ""
+		}
+		mv := bookMoveJSON{
+			From:   int(legal.From),
+			To:     int(legal.To),
+			Weight: int(e.Weight),
+			San:    san,
+		}
+		if legal.Promotion != 0 {
+			promo := int(legal.Promotion)
+			mv.Promotion = &promo
+		}
+		out = append(out, mv)
+	}
+
+	// Probe returns entries sorted by hash, not weight — sort by weight
+	// descending so the panel lists the most likely moves first.
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Weight > out[j].Weight
+	})
+
+	raw, err := json.Marshal(out)
+	if err != nil {
+		return js.ValueOf("[]")
+	}
+	return js.ValueOf(string(raw))
+}
+
 // aiMoveJS runs a time-limited AI search and returns the best move as JSON.
+// Probes the opening book first — on a hit, returns the book move instantly.
 func aiMoveJS(_ js.Value, args []js.Value) interface{} {
+	if move, ok := probeBook(); ok {
+		return moveToJSON(move)
+	}
 	timeLimitMs := 500
 	if len(args) > 0 && !args[0].IsUndefined() && args[0].Type() == js.TypeNumber {
 		timeLimitMs = args[0].Int()
@@ -78,7 +196,11 @@ func aiMoveJS(_ js.Value, args []js.Value) interface{} {
 
 // aiMoveDepthJS runs a fixed-depth AI search (no time limit) and returns the
 // best move as JSON. Used for testing/benchmarking in the browser.
+// Probes the opening book first — on a hit, returns the book move instantly.
 func aiMoveDepthJS(_ js.Value, args []js.Value) interface{} {
+	if move, ok := probeBook(); ok {
+		return moveToJSON(move)
+	}
 	depth := 4
 	if len(args) > 0 && !args[0].IsUndefined() && args[0].Type() == js.TypeNumber {
 		depth = args[0].Int()
@@ -90,7 +212,12 @@ func aiMoveDepthJS(_ js.Value, args []js.Value) interface{} {
 // aiAnalysisJS runs a time-limited AI search and returns the best move plus
 // the evaluation score and search depth as JSON. Used by the "Analisar" button
 // to show the engine's assessment of the current position.
+// Probes the opening book first — on a hit, returns the book move with
+// score=0, depth=0 (book moves are not searched).
 func aiAnalysisJS(_ js.Value, args []js.Value) interface{} {
+	if move, ok := probeBook(); ok {
+		return analysisToJSON(ai.SearchResult{Move: move})
+	}
 	timeLimitMs := 1000
 	if len(args) > 0 && !args[0].IsUndefined() && args[0].Type() == js.TypeNumber {
 		timeLimitMs = args[0].Int()
@@ -371,6 +498,8 @@ func main() {
 	e.Set("aiMoveDepth", js.FuncOf(aiMoveDepthJS))
 	e.Set("aiAnalysis", js.FuncOf(aiAnalysisJS))
 	e.Set("aiMultiPv", js.FuncOf(aiMultiPvJS))
+	e.Set("loadBook", js.FuncOf(loadBookJS))
+	e.Set("bookMoves", js.FuncOf(bookMovesJS))
 	e.Set("fen", js.FuncOf(fenJS))
 	e.Set("san", js.FuncOf(sanJS))
 	e.Set("applyPgn", js.FuncOf(applyPgnJS))

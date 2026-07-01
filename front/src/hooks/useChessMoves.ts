@@ -25,6 +25,7 @@ export interface UseChessMovesReturn {
     moverColor: ChessColor,
   ) => Promise<void>;
   handleSquareClick: (index: number) => Promise<void>;
+  playMove: (from: number, to: number, promotion?: number) => Promise<void>;
   choosePromotion: (promotionByte: number) => Promise<void>;
   cancelPromotion: () => void;
 }
@@ -169,6 +170,22 @@ export const useChessMoves = ({
     [engine, isAiTurn, isAtLatest, applyMove, stateRef, setState],
   );
 
+  // playMove applies a fully-specified move directly, without the click/select
+  // round-trip. Used by the opening-book panel: chaining two handleSquareClick
+  // calls fails because handleSquareClick reads stateRef, which only refreshes
+  // after a re-render — so the second click sees a stale (null) selection.
+  const playMove = useCallback(
+    async (from: number, to: number, promotion = 0) => {
+      if (!engine) return;
+      const prev = stateRef.current;
+      if (prev.result !== null || prev.aiThinking || isAiTurn(prev.currentPlayer))
+        return;
+      if (!isAtLatest) return;
+      await applyMove(engine, from, to, promotion, prev.currentPlayer);
+    },
+    [engine, isAiTurn, isAtLatest, applyMove, stateRef],
+  );
+
   const choosePromotion = useCallback(
     async (promotionByte: number) => {
       const prev = stateRef.current;
@@ -192,5 +209,5 @@ export const useChessMoves = ({
     setState((p) => ({ ...p, pendingPromotion: null }));
   }, [setState]);
 
-  return { applyMove, handleSquareClick, choosePromotion, cancelPromotion };
+  return { applyMove, handleSquareClick, playMove, choosePromotion, cancelPromotion };
 };

@@ -6,17 +6,38 @@ import (
 	"runtime"
 
 	"webassemble/pkg/ai"
+	"webassemble/pkg/book"
 	"webassemble/pkg/engine"
 )
 
 // handleGo starts a search in a goroutine and prints "info" + "bestmove"
 // when it completes. A "stop" command closes s.stopCh which aborts the
 // search; the goroutine then finishes and prints bestmove.
+//
+// If an opening book is loaded and the current position is in the book,
+// a weighted-random book move is played instantly without searching.
 func (s *uciSession) handleGo(parts []string) {
 	s.stopSearch()
 
 	gp := s.parseGo(parts)
 	timeMs := s.computeTimeLimit(gp)
+
+	// Probe opening book before searching
+	if s.book != nil {
+		hash := book.PolyglotHash(&s.pos)
+		if polyMove, ok := s.book.PickMove(hash, s.rng); ok {
+			bookMove := book.DecodePolyglotMove(polyMove)
+			legal, matched := book.MatchLegalMove(&s.pos, bookMove)
+			if matched {
+				moveStr := moveToUCI(legal)
+				os.Stdout.WriteString("info string book move\n")
+				os.Stdout.WriteString("bestmove " + moveStr + "\n")
+				os.Stdout.Sync()
+				dbg("book move: %s", moveStr)
+				return
+			}
+		}
+	}
 
 	// Clone the position for the search goroutine so the main goroutine can
 	// keep handling stdin (e.g. "stop") without a data race on the board.
